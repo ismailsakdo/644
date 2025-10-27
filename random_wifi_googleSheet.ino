@@ -1,4 +1,5 @@
 // Simplified ESP32 Code for Sending Simulated Temperature, Humidity, and THI to Google Sheets
+//https://docs.google.com/forms/d/e/1FAIpQLSc-OT6vLIN4JkxPS5U8ll4PRBiOq4Y7wPqQW81nTEKRpdomBQ/viewform?usp=pp_url&entry.772925471=1&entry.54319464=2&entry.1261448659=3
 
 // --- Required Libraries ---
 #include <WiFi.h>          // For Wi-Fi connectivity
@@ -7,13 +8,13 @@
 
 // --- Google Forms & Data Configuration ---
 // Google Form URL for data submission
-#define FORM_URL "https://docs.google.com/forms/d/e/1FAIpQLScjJwk2TyKyagz7QOSk-lzjIF0Vyvbm-LZkOq40O7Xx1c8Ceg/formResponse?"
+#define FORM_URL "https://docs.google.com/forms/d/e/1FAIpQLSc-OT6vLIN4JkxPS5U8ll4PRBiOq4Y7wPqQW81nTEKRpdomBQ/formResponse?"
 
 // Google Form Entry IDs
 // IMPORTANT: Replace these with your actual Google Form field IDs.
-#define entry_temperature  "entry.2121212121"
-#define entry_humidity     "entry.2121212122"
-#define entry_thi          "entry.21212121221"
+#define entry_temperature  "entry.772925471"
+#define entry_humidity     "entry.54319464"
+#define entry_thi          "entry.1261448659"
 
 // --- System Variables ---
 #define SERIAL_BAUD 115200         // Baud rate for serial output
