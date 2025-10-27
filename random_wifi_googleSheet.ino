@@ -1,10 +1,14 @@
-// Simplified ESP32 Code for Sending Simulated Temperature, Humidity, and THI to Google Sheets
-//https://docs.google.com/forms/d/e/1FAIpQLSc-OT6vLIN4JkxPS5U8ll4PRBiOq4Y7wPqQW81nTEKRpdomBQ/viewform?usp=pp_url&entry.772925471=1&entry.54319464=2&entry.1261448659=3
+// Revised ESP32 Code for Sending Simulated Data to Google Sheets
+//https://docs.google.com/forms/d/e//viewform?usp=pp_url&entry.772925471=1&entry.54319464=2&entry.1261448659=3
 
 // --- Required Libraries ---
 #include <WiFi.h>          // For Wi-Fi connectivity
 #include <HTTPClient.h>    // For making HTTP POST requests
-#include <WiFiManager.h>   // For easy Wi-Fi configuration
+
+// --- Wi-Fi Configuration for a Real Device ---
+// **IMPORTANT:** REPLACE these with your actual Wi-Fi network credentials
+#define WIFI_SSID "iPhone"  // <-- CHANGE THIS
+#define WIFI_PASS "12345678" // <-- CHANGE THIS
 
 // --- Google Forms & Data Configuration ---
 // Google Form URL for data submission
@@ -18,7 +22,7 @@
 
 // --- System Variables ---
 #define SERIAL_BAUD 115200         // Baud rate for serial output
-#define DATA_SEND_INTERVAL 30000   // Interval for sending data (30 seconds)
+#define DATA_SEND_INTERVAL 1000   // Interval for sending data (30 seconds)
 unsigned long lastSendMillis = 0;
 
 // Variables to store simulated data
@@ -42,20 +46,57 @@ String urlEncode(const String& str) {
   return encoded;
 }
 
-// --- Function to connect to Wi-Fi using WiFiManager ---
-void setup_wifi_manager() {
-  Serial.println("\nStarting WiFiManager configuration...");
-  WiFiManager wm;
-  bool res = wm.autoConnect("ESP32_Data_Logger", "password");
+// --- Function to connect to Wi-Fi for Real ESP32 ---
+void setup_wifi() {
+  Serial.print("\nAttempting to connect to Wi-Fi: ");
+  Serial.println(WIFI_SSID);
+  
+  // Set WiFi to station mode
+  WiFi.mode(WIFI_STA);
+  // Initiate connection with hardcoded credentials
+  WiFi.begin(WIFI_SSID, WIFI_PASS); 
 
-  if (!res) {
-    Serial.println("Failed to connect to WiFi! Restarting...");
-    delay(5000);
-    ESP.restart();
-  } else {
-    Serial.println("WiFi connected successfully!");
+  // Wait for connection
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) { // Increased attempts for real-world reliability
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi connected successfully!");
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nFailed to connect to WiFi! Check credentials and router.");
+    // Continue execution, but data submission will be skipped until reconnected
+  }
+}
+
+// --- Function to check and reconnect Wi-Fi ---
+void reconnect_wifi() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.print("\nWiFi connection lost. Reconnecting...");
+    // Stop and restart the connection attempt
+    WiFi.disconnect();
+    WiFi.reconnect();
+    
+    // Wait for connection attempt
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+      delay(500);
+      Serial.print(".");
+      attempts++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("\nReconnected successfully!");
+      Serial.print("IP Address: ");
+      Serial.println(WiFi.localIP());
+    } else {
+      Serial.println("\nReconnection failed. Will try again next loop.");
+    }
   }
 }
 
@@ -67,8 +108,11 @@ float calculateTHI(float temp, float rh) {
 
 // --- Function to Send Data to Google Form ---
 void sendToGoogle() {
+  // Check and ensure connection *before* sending data
+  reconnect_wifi(); 
+  
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi not connected. Skipping submission.");
+    Serial.println("WiFi not connected. Skipping data submission.");
     return;
   }
 
@@ -84,14 +128,15 @@ void sendToGoogle() {
   Serial.print("POSTing data: ");
   Serial.println(postData);
 
-  http.begin(FORM_URL);
+  // Use http.begin() with the full URL
+  http.begin(FORM_URL); 
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   int responseCode = http.POST(postData);
 
   if (responseCode == HTTP_CODE_OK) {
-    Serial.println("Data submitted successfully!");
+    Serial.println("Data submitted successfully! HTTP 200");
   } else {
-    Serial.print("Error: HTTP response code ");
+    Serial.print("Error submitting data. HTTP response code: ");
     Serial.println(responseCode);
   }
   http.end();
@@ -103,18 +148,13 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   while (!Serial);
   Serial.println("\n--- ESP32 Data Simulation Initializing ---");
-  randomSeed(analogRead(0)); // Seed random number generator for better randomness
+  randomSeed(analogRead(0)); // Seed random number generator
 
-  setup_wifi_manager();
+  // Connect to Wi-Fi
+  setup_wifi();
 }
 
 void loop() {
-  // Ensure Wi-Fi connection is maintained
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected. Attempting to reconnect...");
-    setup_wifi_manager();
-  }
-
   // Time-based actions for data submission
   unsigned long currentMillis = millis();
   if (currentMillis - lastSendMillis >= DATA_SEND_INTERVAL) {
