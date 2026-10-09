@@ -209,3 +209,7 @@ Where:
 | `fatal error: TFT_eSPI.h: No such file or directory` | Hardware display library mismatch. | Remove `#include <TFT_eSPI.h>` and use `M5Unified` via `#include <M5Unified.h>`. |
 | `A fatal error occurred: Could not open COMx` | Port is held open by another terminal session. | Close all active serial terminals, Putty, or IDE monitor instances, then retry `pio run -t upload`. |
 | `Failed to connect to ESP32-S3` | USB-C cable lacks data lines or device CDC state hung. | Hold the **G0 button** on the M5StickS3 while connecting the USB-C cable to force bootloader mode. |
+
+```
+
+```
