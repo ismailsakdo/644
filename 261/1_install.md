@@ -319,11 +319,15 @@ $$I_{\text{avg}} = \frac{1}{T_{\text{total}}} \sum_{i=1}^{N} \left( I_i \cdot t_
 
 ## 4.2 Signal Debouncing Model
 
-Mechanical button state changes are valid only when satisfying the timing condition:
+Physical button contacts exhibit mechanical bounce. The state transition conditions are governed by the following timing inequality:
 
 $$\Delta t = t_{\text{sample}} - t_{\text{last\_change}} > \tau_{\text{debounce}}$$
 
-Where $\tau_{\text{debounce}} = 50\text{ ms}$.
+Where:
+
+* $t_{\text{sample}}$ = Current timestamp measured via `millis()`
+* $t_{\text{last\_change}}$ = Timestamp of the last raw pin state transition
+* $\tau_{\text{debounce}}$ = Settling time threshold (configured to $50\text{ ms}$)
 
 ---
 
