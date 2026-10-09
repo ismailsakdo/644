@@ -329,7 +329,6 @@ Where:
 * $t_{\text{last\_change}}$ = Timestamp of the last raw pin state transition
 * $\tau_{\text{debounce}}$ = Settling time threshold (configured to $50\text{ ms}$)
 
----
 
 # SECTION 5 — ARCHITECTURAL DIRECTIVES & WORKFLOW
 
