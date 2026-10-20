@@ -1,334 +1,445 @@
 # Lesson 02: Cloud Telemetry Ingestion — ThingSpeak IoT & Google Forms Reverse Engineering
 
-This module guides you through configuring and validating dual cloud-ingestion pipelines for edge IoT fleets: **ThingSpeak** (a specialized IoT Platform-as-a-Service by MathWorks) and **Google Forms/Sheets** (a serverless, zero-cost operational data ledger).
+This module details how to provision, configure, and independently validate two distinct cloud-ingestion pipelines for edge IoT fleets: **ThingSpeak** (a specialized time-series IoT PaaS) and **Google Forms/Sheets** (a serverless, zero-cost tabular ledger).
 
-Before transmitting data from physical microcontrollers, you must establish and verify these cloud endpoints using software-based API testing tools to isolate networking issues from firmware bugs.
+To eliminate configuration collisions and protocol confusion, **ThingSpeak** (HTTP GET / REST) and **Google Forms** (HTTP POST / URL-encoded form submissions) are implemented and tested as **two isolated, standalone Python testing workflows**.
 
-```
-                    CLOUD INGESTION TIER ARCHITECTURE
-                    
-                        +----------------------------+
-                        |  M5Stack Stick S3 (Edge)   |
-                        +----------------------------+
-                                      |
-                 +--------------------+--------------------+
-                 | HTTPS / TLS 1.2                         | HTTPS / TLS 1.2
-                 v                                         v
-   +---------------------------+             +---------------------------+
-   |    ThingSpeak IoT PaaS    |             |   Google Cloud Endpoint   |
-   | (Time-Series Telemetry)   |             |  (Serverless Form Logger) |
-   +---------------------------+             +---------------------------+
-                 |                                         |
-                 v                                         v
-   +---------------------------+             +---------------------------+
-   | - Real-time Field Charts  |             | - Google Forms Response   |
-   | - MATLAB Signal Analytics |             | - Google Sheets Database  |
-   | - React & Email Alerts    |             | - Business KPI Dashboard  |
-   +---------------------------+             +---------------------------+
+```text
+                             CLOUD INGESTION ARCHITECTURE
+                             
+                     +-----------------------------------------+
+                     |  M5Stack Stick S3 / Local Test Engine   |
+                     +-----------------------------------------+
+                                          |
+                +-------------------------+-------------------------+
+                |                                                   |
+      [PIPELINE A: TIME-SERIES]                           [PIPELINE B: TABULAR LOGS]
+                |                                                   |
+                | HTTPS GET (REST API)                              | HTTPS POST (URL-Encoded)
+                v                                                   v
+  +---------------------------+                       +---------------------------+
+  |    ThingSpeak IoT PaaS    |                       |   Google Forms Ingress    |
+  |  `api.thingspeak.com`     |                       |  `docs.google.com/forms`  |
+  +---------------------------+                       +---------------------------+
+                |                                                   |
+                v                                                   v
+  +---------------------------+                       +---------------------------+
+  | - 15-Sec Ingestion Window |                       | - Sub-second Ingestion    |
+  | - Field 1 to Field 4      |                       | - entry.XXXXXXXXX Schema  |
+  | - Integrated MATLAB Plots |                       | - Auto-Synced Sheets DB   |
+  +---------------------------+                       +---------------------------+
 
 ```
 
 ---
 
-## 1. Cloud Architecture & Enterprise Ingestion Trade-Offs
+## 1. Architectural Trade-Off Analysis
 
-Choosing an IoT data ingestion pattern requires balancing development velocity, throughput, analytical capacity, and operational cost:
-
-| Evaluation Metric | ThingSpeak (MathWorks PaaS) | Google Forms / Sheets (SaaS Pipeline) |
+| Architectural Metric | Pipeline A: ThingSpeak (PaaS) | Pipeline B: Google Forms/Sheets (SaaS) |
 | --- | --- | --- |
-| **Primary Ingestion Protocol** | HTTP REST (`GET` / `POST`), MQTT | HTTPS `POST` (`application/x-www-form-urlencoded`) |
-| **Free Tier Ingestion Rate** | 1 entry per **15 seconds** (max 3M msgs/yr) | ~1 entry per **1–2 seconds** (governed by Google quotas) |
-| **Data Payload Format** | URL Query parameters / JSON | URL-encoded Form body parameters |
-| **Built-in Analytics** | Native MATLAB analytics & visualizations | Google Sheets formulas, Apps Script, Looker Studio |
-| **Authentication Scheme** | Static Write/Read API Keys | Open headless Form ID + hidden input field tokens |
-| **Optimal Business Role** | High-frequency physical machine telemetry | Operational shift reporting, low-frequency audit logging |
+| **Ingestion Protocol** | HTTP REST (`GET` / `POST`), MQTT | HTTPS `POST` (`application/x-www-form-urlencoded`) |
+| **Rate Limit Constraint** | **1 entry per 15 seconds** (Free Tier) | **No hard throttle** (~1 entry per 1–2 sec practical) |
+| **Data Topology** | Strict numerical time-series (Fields 1–8) | Unstructured tabular strings, floats, text notes |
+| **Native Tooling** | Built-in MATLAB analytics & time-plots | Spreadsheet formulas, AppSheet, Looker Studio |
+| **Authentication** | Static 16-character Write API Key | Headless Form Endpoint + Input Tokens |
+| **Primary Business Role** | Continuous condition monitoring & analytics
+
+ | Shift auditing, inventory ledger, lifecycle logs
+
+ |
 
 ---
 
-## 2. Module A: ThingSpeak IoT Setup & API Provisioning
+## 2. Pipeline A: ThingSpeak Setup & Dedicated Validation
 
-ThingSpeak provides hosted time-series storage designed for sensor logging, featuring built-in charting and integration with MATLAB for signal processing.
+ThingSpeak requires strict compliance with its **15-second rate limit** and utilizes numerical field indexing.
 
-### Step 2.1: Channel Creation
+### Step 2.1: Channel Provisioning
 
-1. Navigate to [ThingSpeak.com](https://thingspeak.com/) and sign in with a MathWorks account.
+1. Log in to [ThingSpeak.com](https://thingspeak.com/).
 2. Select **Channels** $\rightarrow$ **My Channels** $\rightarrow$ **New Channel**.
-3. Configure the channel metadata:
-* **Name:** `M5StickS3_Industrial_Fleet`
-* **Description:** `Vibration, battery health, and operational diagnostics stream.`
+3. Fill in the channel settings:
+* **Name:** `M5StickS3_Vibration_Fleet`
+* **Field 1:** `Vibration_RMS_G` (Target: Accelerometer magnitude)
+* **Field 2:** `Battery_Level_Pct` (Target: PMIC battery fuel gauge)
+* **Field 3:** `Core_Temperature_C` (Target: ESP32-S3 internal temperature)
+* **Field 4:** `Alert_Flag` (Target: 0 = Normal, 1 = Exceeded Threshold)
 
 
-4. Enable and label the following fields:
-* `Field 1`: `Vibration_RMS_G` (Vector acceleration magnitude)
-* `Field 2`: `Battery_Level_Pct` (PMIC battery fuel gauge)
-* `Field 3`: `Hardware_Temperature_C` (Internal SoC temperature)
-* `Field 4`: `Audit_Trigger_Code` (Manual physical button state)
+4. Click **Save Channel**.
 
+### Step 2.2: Extract API Keys
 
-5. Scroll down and click **Save Channel**.
+1. Click the **API Keys** tab.
+2. Note your **Channel ID** and copy your **Write API Key**.
 
-### Step 2.2: Extract API Credentials
+### Step 2.3: Baseline Verification (cURL)
 
-1. Click the **API Keys** tab on your newly created channel.
-2. Record the following values in your workspace configuration notes:
-* **Channel ID:** (e.g., `2847192`)
-* **Write API Key:** (16-character alphanumeric string, e.g., `WXYZ1234ABCD5678`)
-* **Read API Key:** (Used in later modules for data retrieval)
-
-
-
-> **Security Notice:** The **Write API Key** grants write access to your cloud channel. Never commit raw API keys to public version control repositories.
-
-### Step 2.3: Headless Endpoint Verification via Terminal (cURL)
-
-Before writing microcontroller firmware, verify that your channel accepts data over raw HTTP. Open your terminal and issue an HTTP request containing dummy telemetry:
-
-#### macOS / Linux / Windows PowerShell:
+Run this command in your terminal to ensure the channel accepts data:
 
 ```bash
-# Ingest synthetic telemetry into Fields 1, 2, 3, and 4
-curl -X GET "https://api.thingspeak.com/update?api_key=YOUR_WRITE_API_KEY&field1=0.98&field2=87&field3=38.5&field4=1"
+curl -X GET "https://api.thingspeak.com/update?api_key=YOUR_WRITE_API_KEY&field1=1.02&field2=95&field3=37.2&field4=0"
 
 ```
 
-#### Verification Checkpoint:
-
-* The ThingSpeak server returns a positive integer representing the **Entry ID** (e.g., `1`, `2`, `3...`).
-* If the terminal returns `0`, your request was throttled by the 15-second rate limit or the API key is incorrect.
-* Refresh your ThingSpeak channel dashboard in your browser. Verify that points appear on all 4 channel graphs.
+* **Success:** Returns a positive integer (the continuous Entry ID, e.g., `1`).
+* **Rate-Limited / Fail:** Returns `0`.
 
 ---
 
-## 3. Module B: Google Forms Telemetry Ingestion (Headless Endpoint)
+### Step 2.4: Dedicated Python Script: `test_thingspeak.py`
 
-Google Forms is designed for human input through a web browser, but its underlying submission engine uses standard HTTP POST requests. By analyzing the form schema, you can use Google Forms as an authenticated cloud ingress API that pipes edge telemetry into Google Sheets.
+This standalone script simulates edge physics (vibration vector magnitude with random walk drift, battery drain, and thermal rise), enforces the mandatory 16-second sleep window, and prints real-time HTTP metrics.
 
-```
-                  GOOGLE FORMS INGESTION FLOW
-                  
-   M5Stick S3                 Google Ingress Engine               Google Sheets
-  [Edge Node]                   [Cloud Serverless]              [Persistent Table]
-       |                                |                               |
-       |  HTTPS POST /formResponse      |                               |
-       |  entry.X=Node01&entry.Y=1.04   |                               |
-       |------------------------------->|                               |
-       |                                | Parse payload & append row    |
-       |                                |------------------------------>|
-       |  HTTP 200 OK / 302 Redirect    |                               |
-       |<-------------------------------|                               |
-
-```
-
-### Step 3.1: Form Configuration
-
-1. Open [Google Forms](https://forms.google.com/) and create a new blank form.
-2. Set the Title to: `M5StickS3 Fleet Data Lake`.
-3. Create five **Short answer** questions:
-* Question 1: `Device_UUID`
-* Question 2: `Vibration_RMS`
-* Question 3: `Battery_Level`
-* Question 4: `Operational_State`
-* Question 5: `Diagnostic_Notes`
-
-
-4. In the top settings bar, verify that **Collect email addresses** and **Limit to 1 response** are **disabled** so headless programmatic submissions can proceed without browser authentication.
-
-### Step 3.2: Extracting Underlying Form Entry IDs
-
-Google Forms maps each input to an internal identifier (e.g., `entry.184729104`). To find these identifiers:
-
-1. Click the **three vertical dots** in the top-right corner $\rightarrow$ select **Get pre-filled link**.
-2. Type distinctive placeholder text into each field:
-* `Device_UUID` $\rightarrow$ `VAL_UUID`
-* `Vibration_RMS` $\rightarrow$ `VAL_VIB`
-* `Battery_Level` $\rightarrow$ `VAL_BAT`
-* `Operational_State` $\rightarrow$ `VAL_STATE`
-* `Diagnostic_Notes` $\rightarrow$ `VAL_NOTES`
-
-
-3. Click **Get link** at the bottom, then click **Copy link** from the toast notification.
-4. Paste the URL into a text editor. It will look like this:
-```text
-https://docs.google.com/forms/d/e/1FAIpQLScXyzEXAMPLE9876543210/viewform?usp=pp_url&entry.104523912=VAL_UUID&entry.839201441=VAL_VIB&entry.471928411=VAL_BAT&entry.193847261=VAL_STATE&entry.901827364=VAL_NOTES
-
-```
-
-
-
-### Step 3.3: Constructing the Headless Ingestion URL
-
-To convert this human-facing link into a machine-facing ingress endpoint:
-
-1. Replace `/viewform` with `/formResponse`.
-2. Map the extracted `entry.XXXXXXXXX` IDs:
-
-```text
-Form Response Target: 
-https://docs.google.com/forms/d/e/1FAIpQLScXyzEXAMPLE9876543210/formResponse
-
-Extracted Parameters:
-- Device_UUID        -> entry.104523912
-- Vibration_RMS      -> entry.839201441
-- Battery_Level      -> entry.471928411
-- Operational_State  -> entry.193847261
-- Diagnostic_Notes   -> entry.901827364
-
-```
-
-### Step 3.4: Headless Validation via Terminal (cURL)
-
-Submit synthetic operational data to the endpoint using an HTTP POST request:
-
-```bash
-curl -s -o /dev/null -w "%{http_code}" -X POST \
-  "https://docs.google.com/forms/d/e/YOUR_FORM_ID_HERE/formResponse" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "entry.104523912=M5StickS3_SIM_01" \
-  -d "entry.839201441=0.042" \
-  -d "entry.471928411=96" \
-  -d "entry.193847261=NOMINAL" \
-  -d "entry.901827364=Initial_API_Ingress_Verification"
-
-```
-
-#### Verification Checkpoint:
-
-* The command returns an HTTP status code:
-* `200` (Success - Form submission acknowledged).
-* `302` (Redirect - Form submission processed; Google redirects to confirmation page).
-
-
-* If an error occurs (`400` or `404`), verify that the Form ID and entry numbers match your form link.
-* Go to the **Responses** tab in Google Forms. Click **Link to Sheets** $\rightarrow$ **Create a new spreadsheet**.
-* Open the Google Sheet and confirm that the timestamp, device ID, and telemetry fields populate automatically in real time.
-
----
-
-## 4. Cross-Platform Automated Validation Script
-
-To verify both cloud endpoints before writing ESP32-S3 firmware, use this Python test harness to emulate an active edge device streaming telemetry over time.
-
-Create a verification script on your computer: `tools/cloud_validation_harness.py`.
+Create `tools/test_thingspeak.py`:
 
 ```python
 #!/usr/bin/env python3
-#"""
-#M5Stack Stick S3 Journey - Lesson 02: Cloud Telemetry Test Harness
-#Emulates an edge device sending time-series data to ThingSpeak and Google Forms.
-#"""
+"""
+===============================================================================
+M5Stack Stick S3 Journey - Lesson 02: Pipeline A
+Dedicated ThingSpeak IoT Telemetry Test Harness
+===============================================================================
+"""
 
 import time
 import math
 import random
 import requests
 
-# =====================================================================
-# USER CONFIGURATION: Paste your validated keys and endpoints below
-# =====================================================================
-THINGSPEAK_WRITE_API_KEY = "YOUR_THINGSPEAK_WRITE_KEY"
-GOOGLE_FORM_ENDPOINT = "https://docs.google.com/forms/d/e/YOUR_FORM_ID/formResponse"
+# -----------------------------------------------------------------------------
+# USER CONFIGURATION
+# -----------------------------------------------------------------------------
+THINGSPEAK_WRITE_KEY = "YOUR_THINGSPEAK_WRITE_KEY"  # Replace with 16-char key
+UPDATE_INTERVAL_SEC  = 16  # Must be >= 15 seconds for free tier
+CYCLES_TO_RUN        = 3
+# -----------------------------------------------------------------------------
 
-GOOGLE_FORM_ENTRIES = {
-    "device_id": "entry.104523912",
-    "vibration": "entry.839201441",
-    "battery": "entry.471928411",
-    "status": "entry.193847261",
-    "notes": "entry.901827364"
-}
-# =====================================================================
-
-DEVICE_UUID = "M5S3_EMULATOR_MAC_7C02"
-
-def generate_telemetry(step_index: int):
-    """Generates synthetic physics telemetry."""
-    vibration = round(1.0 + 0.3 * math.sin(step_index * 0.5) + random.uniform(-0.05, 0.05), 3)
-    battery = max(10, 100 - (step_index * 2))
-    soc_temp = round(35.0 + random.uniform(0.5, 3.2), 1)
-    status = "ALERT_VIB" if vibration > 1.25 else "NORMAL"
-    notes = "Simulated_Edge_Drift" if status == "ALERT_VIB" else "Steady_State"
+def generate_telemetry_frame(step: int) -> dict:
+    """Simulates multi-variable physical telemetry from an M5Stick S3."""
+    # Simulates baseline 1.0g gravity with harmonic machine vibration
+    vibration_rms = round(1.0 + (0.25 * math.sin(step * 0.8)) + random.uniform(-0.04, 0.04), 3)
+    
+    # Battery percentage slowly draining
+    battery_pct = max(5, 100 - (step * 2))
+    
+    # Internal SoC temperature (Celsius)
+    temp_c = round(36.5 + (step * 0.4) + random.uniform(-0.2, 0.2), 1)
+    
+    # Edge threshold logic: Flag alarm if vibration exceeds 1.20g
+    alert_flag = 1 if vibration_rms > 1.20 else 0
     
     return {
-        "vib": vibration,
-        "bat": battery,
-        "temp": soc_temp,
-        "status": status,
-        "notes": notes
+        "field1": vibration_rms,
+        "field2": battery_pct,
+        "field3": temp_c,
+        "field4": alert_flag
     }
 
-def push_thingspeak(data: dict):
+def post_to_thingspeak(payload: dict) -> bool:
+    """Executes HTTP GET request against ThingSpeak REST API."""
     url = "https://api.thingspeak.com/update"
     params = {
-        "api_key": THINGSPEAK_WRITE_API_KEY,
-        "field1": data["vib"],
-        "field2": data["bat"],
-        "field3": data["temp"],
-        "field4": 1 if data["status"] == "ALERT_VIB" else 0
+        "api_key": THINGSPEAK_WRITE_KEY,
+        **payload
     }
+    
     try:
-        res = requests.get(url, params=params, timeout=5)
-        if res.status_code == 200 and res.text != "0":
-            print(f"[ThingSpeak] Ingested Entry ID: {res.text.strip()}")
+        start_time = time.time()
+        response = requests.get(url, params=params, timeout=5.0)
+        elapsed_ms = round((time.time() - start_time) * 1000, 1)
+        
+        if response.status_code == 200:
+            entry_id = response.text.strip()
+            if entry_id == "0":
+                print(f"[REJECTED] HTTP 200 received, but Entry ID is 0. Rate limit violated!")
+                return False
+            else:
+                print(f"[SUCCESS] Ingested -> Entry ID: {entry_id} (Server Latency: {elapsed_ms} ms)")
+                return True
         else:
-            print(f"[ThingSpeak] Throttled or Rejected (Response: {res.text})")
-    except Exception as e:
-        print(f"[ThingSpeak] Transport Error: {e}")
-
-def push_google_form(data: dict):
-    payload = {
-        GOOGLE_FORM_ENTRIES["device_id"]: DEVICE_UUID,
-        GOOGLE_FORM_ENTRIES["vibration"]: str(data["vib"]),
-        GOOGLE_FORM_ENTRIES["battery"]: str(data["bat"]),
-        GOOGLE_FORM_ENTRIES["status"]: data["status"],
-        GOOGLE_FORM_ENTRIES["notes"]: data["notes"]
-    }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    try:
-        res = requests.post(GOOGLE_FORM_ENDPOINT, data=payload, headers=headers, timeout=5)
-        if res.status_code in [200, 302]:
-            print(f"[GoogleForm] Successfully posted response (HTTP {res.status_code})")
-        else:
-            print(f"[GoogleForm] Failed with HTTP {res.status_code}")
-    except Exception as e:
-        print(f"[GoogleForm] Transport Error: {e}")
+            print(f"[ERROR] HTTP Failed with status {response.status_code}: {response.text}")
+            return False
+            
+    except requests.exceptions.RequestException as exc:
+        print(f"[NETWORK ERROR] Failed to connect to ThingSpeak: {exc}")
+        return False
 
 def main():
-    print("=" * 60)
-    print("M5STACK STICK S3: CLOUD INGESTION BENCHMARK HARNESS")
-    print("=" * 60)
+    print("=" * 70)
+    print("  THINGSPEAK DEDICATED TELEMETRY PIPELINE TEST")
+    print(f"  Target: api.thingspeak.com | Interval: {UPDATE_INTERVAL_SEC}s")
+    print("=" * 70)
     
-    for cycle in range(1, 4):
-        print(f"\n[CYCLE {cycle}/3] Generating Telemetry Batch...")
-        telemetry = generate_telemetry(cycle)
-        print(f" -> Telemetry: {telemetry}")
+    for cycle in range(1, CYCLES_TO_RUN + 1):
+        print(f"\n[Cycle {cycle}/{CYCLES_TO_RUN}] Polling simulated edge sensors...")
+        data = generate_telemetry_frame(cycle)
         
-        push_thingspeak(telemetry)
-        push_google_form(telemetry)
+        print(f"  - Vibration RMS  (Field 1): {data['field1']} g")
+        print(f"  - Battery Level  (Field 2): {data['field2']} %")
+        print(f"  - Internal Temp  (Field 3): {data['field3']} °C")
+        print(f"  - Anomaly Alert  (Field 4): {data['field4']}")
         
-        if cycle < 3:
-            print("[THROTTLING] Sleeping 16 seconds to respect ThingSpeak rate limit...")
-            time.sleep(16)
+        success = post_to_thingspeak(data)
+        
+        if cycle < CYCLES_TO_RUN:
+            print(f"  Waiting {UPDATE_INTERVAL_SEC} seconds to comply with rate limits...")
+            for remaining in range(UPDATE_INTERVAL_SEC, 0, -1):
+                print(f"\r  Cooldown: {remaining:02d}s remaining...", end="", flush=True)
+                time.sleep(1)
+            print("\r" + " " * 40 + "\r", end="", flush=True)
 
-    print("\n[COMPLETE] Cloud pipeline verified. Verify live updates in your browser.")
+    print("\n" + "=" * 70)
+    print("ThingSpeak test completed. Check your charts at: https://thingspeak.com")
+    print("=" * 70)
 
 if __name__ == "__main__":
     main()
 
 ```
 
-### Execution
+---
 
-Run the verification script from your local workstation:
+## 3. Pipeline B: Google Forms Setup & Dedicated Validation
 
-```bash
-python3 tools/cloud_validation_harness.py
+Google Forms operates as an open HTTPS endpoint that pipes inputs directly into a persistent Google Sheet.
+
+### Step 3.1: Form Creation & Permissions
+
+1. Go to [Google Forms](https://forms.google.com/) and create a new blank form.
+2. Form Title: `M5StickS3 Enterprise Asset Tracker`.
+3. Create four **Short answer** questions:
+* Question 1: `Device_UUID`
+* Question 2: `Vibration_G`
+* Question 3: `System_Health`
+* Question 4: `Audit_Remark`
+
+
+4. **Permissions Check:** Under **Settings** $\rightarrow$ **Responses**:
+* Turn **OFF** "Limit to 1 response".
+* Turn **OFF** "Restrict to users in [Domain]" (if using an organizational account).
+
+
+
+### Step 3.2: Link to Google Sheets
+
+1. Switch to the **Responses** tab in Google Forms.
+2. Click **Link to Sheets** $\rightarrow$ **Create a new spreadsheet** $\rightarrow$ click **Create**.
+3. Keep the newly created Google Sheet open in your browser to inspect live rows as they arrive.
+
+### Step 3.3: Extracting Form Endpoint & Entry Field Tokens
+
+1. In the Google Form editor, click the **three dots** (top right) $\rightarrow$ **Get pre-filled link**.
+2. Type these markers into each field:
+* `Device_UUID` $\rightarrow$ `MARKER_UUID`
+* `Vibration_G` $\rightarrow$ `MARKER_VIB`
+* `System_Health` $\rightarrow$ `MARKER_HEALTH`
+* `Audit_Remark` $\rightarrow$ `MARKER_REMARK`
+
+
+3. Click **Get link** $\rightarrow$ **Copy link**.
+4. Paste the URL into your text editor:
+```text
+https://docs.google.com/forms/d/e/1FAIpQLSeXyZ_987654321/viewform?usp=pp_url&entry.102938475=MARKER_UUID&entry.584930291=MARKER_VIB&entry.774839201=MARKER_HEALTH&entry.192837465=MARKER_REMARK
+
+```
+
+
+5. Extract the two necessary parameters:
+* **Endpoint Target:** Replace `/viewform` with `/formResponse`:
+```text
+https://docs.google.com/forms/d/e/1FAIpQLSeXyZ_987654321/formResponse
+
+```
+
+
+* **Field Mapping:**
+* `entry.102938475` $\rightarrow$ Device UUID
+* `entry.584930291` $\rightarrow$ Vibration
+* `entry.774839201` $\rightarrow$ System Health
+* `entry.192837465` $\rightarrow$ Audit Remark
+
+
+
+
+
+---
+
+### Step 3.4: Dedicated Python Script: `test_googleform.py`
+
+This standalone script formats an `application/x-www-form-urlencoded` POST request and injects telemetry directly into Google Sheets. Notice that unlike ThingSpeak, you can safely send multiple packets in quick succession (e.g., every 2 seconds).
+
+Create `tools/test_googleform.py`:
+
+```python
+#!/usr/bin/env python3
+"""
+===============================================================================
+M5Stack Stick S3 Journey - Lesson 02: Pipeline B
+Dedicated Google Forms Headless Ingestion Test Harness
+===============================================================================
+"""
+
+import time
+import random
+import requests
+
+# -----------------------------------------------------------------------------
+# USER CONFIGURATION: Replace with your extracted parameters
+# -----------------------------------------------------------------------------
+GFORM_ENDPOINT = "https://docs.google.com/forms/d/e/YOUR_FORM_ID/formResponse"
+
+ENTRY_MAP = {
+    "device_uuid":   "entry.102938475",
+    "vibration_g":   "entry.584930291",
+    "system_health": "entry.774839201",
+    "audit_remark":  "entry.192837465"
+}
+
+TRANSMISSION_DELAY_SEC = 2  # Google Forms does not require a 15-second wait
+BATCH_SIZE = 3
+# -----------------------------------------------------------------------------
+
+def generate_fleet_record(index: int) -> dict:
+    """Generates synthetic fleet health data."""
+    vib = round(random.uniform(0.75, 1.85), 3)
+    health = "CRITICAL" if vib > 1.50 else ("WARNING" if vib > 1.20 else "OPTIMAL")
+    remarks = [
+        "Routine_Edge_Ping",
+        "Harmonic_Resonance_Detected",
+        "Bearing_Wear_Suspected",
+        "Post_Maintenance_Check"
+    ]
+    
+    return {
+        "uuid": f"M5STICK_S3_NODE_{index:02d}",
+        "vib": str(vib),
+        "health": health,
+        "remark": random.choice(remarks)
+    }
+
+def post_to_google_form(record: dict) -> bool:
+    """Executes an HTTPS POST submission directly into the Form endpoint."""
+    payload = {
+        ENTRY_MAP["device_uuid"]:   record["uuid"],
+        ENTRY_MAP["vibration_g"]:   record["vib"],
+        ENTRY_MAP["system_health"]: record["health"],
+        ENTRY_MAP["audit_remark"]:  record["remark"]
+    }
+    
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    
+    try:
+        start_time = time.time()
+        response = requests.post(GFORM_ENDPOINT, data=payload, headers=headers, timeout=5.0)
+        elapsed_ms = round((time.time() - start_time) * 1000, 1)
+        
+        # Google Forms responds with 200 (Success) or 302 (Redirect to acknowledgment)
+        if response.status_code in [200, 302]:
+            print(f"[SUCCESS] Appended row to Google Sheet (Status: {response.status_code}, Time: {elapsed_ms} ms)")
+            return True
+        else:
+            print(f"[FAILED] Submission rejected with HTTP status: {response.status_code}")
+            return False
+            
+    except requests.exceptions.RequestException as exc:
+        print(f"[NETWORK ERROR] Failed to connect to Google Endpoint: {exc}")
+        return False
+
+def main():
+    print("=" * 70)
+    print("  GOOGLE FORMS HEADLESS INGESTION PIPELINE TEST")
+    print(f"  Target: {GFORM_ENDPOINT[:60]}...")
+    print("=" * 70)
+    
+    for batch_idx in range(1, BATCH_SIZE + 1):
+        print(f"\n[Batch {batch_idx}/{BATCH_SIZE}] Constructing Form Payload...")
+        record = generate_fleet_record(batch_idx)
+        
+        print(f"  - Device UUID   : {record['uuid']}")
+        print(f"  - Vibration (G) : {record['vib']}")
+        print(f"  - System Health : {record['health']}")
+        print(f"  - Audit Remark  : {record['remark']}")
+        
+        post_to_google_form(record)
+        
+        if batch_idx < BATCH_SIZE:
+            time.sleep(TRANSMISSION_DELAY_SEC)
+
+    print("\n" + "=" * 70)
+    print("Google Forms test completed. Check your connected Google Sheet!")
+    print("=" * 70)
+
+if __name__ == "__main__":
+    main()
 
 ```
 
 ---
 
-## 5. Structuring Credentials for Future C++ Firmware
+## 4. Execution & Expected Console Outputs
 
-To ensure secrets (Wi-Fi passwords, API keys, Form IDs) are never pushed to public Git repositories, establish a configuration template now. This header file will be used in Lesson 5 when deploying firmware to physical hardware.
+Run each script independently in separate terminal executions to confirm clear, uncoupled results:
+
+### Test 1: Run ThingSpeak Pipeline
+
+```bash
+python3 tools/test_thingspeak.py
+
+```
+
+```text
+======================================================================
+  THINGSPEAK DEDICATED TELEMETRY PIPELINE TEST
+  Target: api.thingspeak.com | Interval: 16s
+======================================================================
+
+[Cycle 1/3] Polling simulated edge sensors...
+  - Vibration RMS  (Field 1): 1.018 g
+  - Battery Level  (Field 2): 98 %
+  - Internal Temp  (Field 3): 36.8 °C
+  - Anomaly Alert  (Field 4): 0
+[SUCCESS] Ingested -> Entry ID: 142 (Server Latency: 320.4 ms)
+  Waiting 16 seconds to comply with rate limits...
+
+```
+
+### Test 2: Run Google Forms Pipeline
+
+```bash
+python3 tools/test_googleform.py
+
+```
+
+```text
+======================================================================
+  GOOGLE FORMS HEADLESS INGESTION PIPELINE TEST
+  Target: https://docs.google.com/forms/d/e/1FAIpQLSe...
+======================================================================
+
+[Batch 1/3] Constructing Form Payload...
+  - Device UUID   : M5STICK_S3_NODE_01
+  - Vibration (G) : 0.941
+  - System Health : OPTIMAL
+  - Audit Remark  : Routine_Edge_Ping
+[SUCCESS] Appended row to Google Sheet (Status: 200, Time: 285.1 ms)
+
+[Batch 2/3] Constructing Form Payload...
+  - Device UUID   : M5STICK_S3_NODE_02
+  - Vibration (G) : 1.624
+  - System Health : CRITICAL
+  - Audit Remark  : Bearing_Wear_Suspected
+[SUCCESS] Appended row to Google Sheet (Status: 200, Time: 210.6 ms)
+
+```
+
+---
+
+## 5. C++ Header Structuring for Future Firmware (`secrets.h`)
+
+To maintain clean separation when programming the ESP32-S3 in Lesson 5, structure your keys into isolated namespaces.
 
 Create `include/secrets.example.h`:
 
@@ -337,26 +448,32 @@ Create `include/secrets.example.h`:
  * ============================================================================
  * Configuration Template: Cloud Ingestion Credentials
  * Action: Copy this file to 'secrets.h' and fill in your actual credentials.
- * Warning: Never commit 'secrets.h' to public version control!
  * ============================================================================
  */
 
 #ifndef SECRETS_H
 #define SECRETS_H
 
-// Local Wi-Fi Credentials
-const char* WIFI_SSID     = "YOUR_WIFI_SSID_2.4G";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+// Network Credentials
+namespace NetworkConfig {
+    const char* WIFI_SSID     = "YOUR_WIFI_SSID_2.4G";
+    const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+}
 
-// ThingSpeak Configuration
-const char* THINGSPEAK_API_KEY = "YOUR_16_CHAR_WRITE_KEY";
+// Pipeline A: ThingSpeak Configuration
+namespace ThingSpeakConfig {
+    const char* WRITE_API_KEY = "YOUR_16_CHAR_WRITE_KEY";
+    const unsigned long MIN_INTERVAL_MS = 15000;
+}
 
-// Google Forms Ingestion Parameters
-const char* GFORM_URL = "https://docs.google.com/forms/d/e/YOUR_FORM_ID/formResponse";
-const char* GENTRY_DEVICE_ID = "entry.104523912";
-const char* GENTRY_VIBRATION = "entry.839201441";
-const char* GENTRY_BATTERY   = "entry.471928411";
-const char* GENTRY_STATUS    = "entry.193847261";
+// Pipeline B: Google Forms Configuration
+namespace GoogleFormConfig {
+    const char* FORM_URL    = "https://docs.google.com/forms/d/e/YOUR_FORM_ID/formResponse";
+    const char* ENTRY_UUID  = "entry.102938475";
+    const char* ENTRY_VIB   = "entry.584930291";
+    const char* ENTRY_STATE = "entry.774839201";
+    const char* ENTRY_NOTES = "entry.192837465";
+}
 
 #endif // SECRETS_H
 
@@ -364,39 +481,42 @@ const char* GENTRY_STATUS    = "entry.193847261";
 
 ---
 
-## 6. Troubleshooting & Edge Cases
+## 6. Pipeline Diagnostic Matrix
 
-| Error / Symptom | Root Cause | Resolution |
-| --- | --- | --- |
-| **ThingSpeak returns `0` on HTTP `GET**` | Rapid requests submitted within the 15-second rate-limit window. | Enforce an edge timer ($\ge 15000\text{ ms}$) between consecutive posts using `millis()`. |
-| **Google Form returns HTTP `400 Bad Request**` | Data type mismatch or missing a required field. | Ensure all required fields receive valid strings, or disable the "Required" toggle in Form edit mode. |
-| **Google Form returns HTTP `401 Unauthorized**` | Form is restricted to users within a specific Google Workspace domain. | In Form Settings $\rightarrow$ Responses: Disable **"Restrict to users in [Domain]"**. |
-| **ThingSpeak chart shows zero points despite `200 OK**` | Data was mapped to an invalid field parameter name (e.g., `Field1` instead of lowercase `field1`). | Ensure URL query parameters use strict lowercase formatting: `field1`, `field2`, etc. |
+| Symptom | Affected Pipeline | Primary Cause | Resolution |
+| --- | --- | --- | --- |
+| **Server returns `0**` | ThingSpeak | Breached the 15-second rate limit. | Ensure `UPDATE_INTERVAL_SEC >= 16` in code. |
+| **HTTP `400 Bad Request**` | Google Forms | Form URL contains `/viewform` or bad entry keys. | Ensure URL ends with `/formResponse` and keys strictly follow `entry.123456789`. |
+| **HTTP `401 / 403 Forbidden**` | Google Forms | Account domain policy requires authentication. | Uncheck **"Restrict to users in..."** in Google Form settings. |
+| **Missing entries in Sheet** | Google Forms | Form is not linked to a target spreadsheet. | In Forms $\rightarrow$ Responses tab, click **Link to Sheets**. |
+| **Values placed in wrong columns** | ThingSpeak | Inverted `fieldX` parameters in query string. | Verify `field1` to `field4` match your configured channel schema. |
 
 ---
 
 ## 7. Hands-On Verification Lab
 
-Complete the following verification steps before advancing to Lesson 3:
+Before proceeding to Lesson 3, complete these tasks:
 
-* [ ] **Task 2.1:** Configure a custom MATLAB visualization widget on your ThingSpeak channel to display an alert banner when `Field 1` exceeds $1.20\text{ G}$.
-* [ ] **Task 2.2:** Add conditional formatting in your linked Google Sheet: highlight rows in red if `Operational_State` equals `"ALERT_VIB"`.
-* [ ] **Task 2.3:** Run `tools/cloud_validation_harness.py` and confirm that all 3 test cycles append new data to both platforms.
+* [ ] **Task 2.1:** Execute `python3 tools/test_thingspeak.py` and confirm 3 consecutive points appear in your ThingSpeak Private View graphs.
+* [ ] **Task 2.2:** Execute `python3 tools/test_googleform.py` and confirm 3 new rows appear in your linked Google Sheet.
+* [ ] **Task 2.3:** Apply a conditional color scale in Google Sheets to automatically flag high vibration values in column B ($> 1.20\text{ G}$).
 
 ---
 
-## 8. Version Control Commit
+## 8. Version Control Protocol
 
-Stage the test harness and credential template while keeping actual credentials ignored:
+Commit the separated testing tools to your repository:
 
 ```bash
-# Append secrets.h to .gitignore
+# Ensure secrets are untracked
 echo "include/secrets.h" >> .gitignore
 
-# Stage verification assets
-git add tools/cloud_validation_harness.py include/secrets.example.h .gitignore
+# Stage separate test scripts and template
+git add tools/test_thingspeak.py tools/test_googleform.py include/secrets.example.h .gitignore
 
-# Commit changes
-git commit -m "feat(lesson02): establish thingspeak channel, reverse-engineer google forms endpoint, and add test harness"
+# Commit
+git commit -m "feat(lesson02): provide isolated test harnesses for thingspeak and google form ingestion"
 
 ```
+
+---
