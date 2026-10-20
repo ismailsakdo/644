@@ -475,5 +475,3 @@ git add platformio.ini src/main.cpp .gitignore
 git commit -m "feat(lesson01): establish platformio toolchain and esp32-s3 silicon diagnostic"
 
 ---
-
-Ready to proceed to **Lesson 02**? We will register your **ThingSpeak IoT channel**, configure the telemetry schema, and reverse-engineer **Google Forms endpoints** for zero-cost HTTP data logging.
