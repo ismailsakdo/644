@@ -400,7 +400,3 @@ git add tools/cloud_validation_harness.py include/secrets.example.h .gitignore
 git commit -m "feat(lesson02): establish thingspeak channel, reverse-engineer google forms endpoint, and add test harness"
 
 ```
-
----
-
-With both cloud endpoints configured and verified, proceed to **Lesson 03**, where we will transition to writing **embedded C++ code within PlatformIO**, explore the ESP32-S3 compilation stages, and structure reliable hardware firmware loops.
