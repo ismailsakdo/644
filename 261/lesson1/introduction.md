@@ -194,31 +194,49 @@ The `platformio.ini` file dictates how the compiler, linker, and uploader treat 
 Create/edit `platformio.ini` in the root of your project:
 
 ```ini
-; =====================================================================
-; PlatformIO Configuration File: M5Stack Stick S3 Base Setup
-; Module: Lesson 01 - Workspace & Toolchain
-; =====================================================================
+[platformio]
+default_envs = m5sticks3
 
-[env:m5stack-s3]
-platform = espressif32 @ ^6.5.0
+[env:m5sticks3]
+platform = espressif32@6.12.0
 board = esp32-s3-devkitc-1
 framework = arduino
 
-; Serial Engine & Upload Pipeline Configuration
-monitor_speed = 115200
-upload_speed = 921600
+; --- Flash & Memory Architecture (ESP32-S3-PICO-1-N8R8) ---
+board_build.f_cpu = 240000000L
+board_build.f_flash = 80000000L
+board_build.flash_mode = qio
+board_build.flash_size = 8MB
+board_upload.flash_size = 8MB
+board_build.partitions = default_8MB.csv
+board_build.arduino.partitions = default_8MB.csv
+board_build.memory_type = qio_opi
+board_build.arduino.memory_type = qio_opi
 
-; Native USB CDC & JTAG Boot Flags (Crucial for ESP32-S3)
-build_flags = 
+; --- Upload & Serial CDC Configuration ---
+upload_speed = 921600
+monitor_speed = 115200
+monitor_filters = 
+    esp32_exception_decoder
+    direct
+    time
+
+; --- Build Flags ---
+build_flags =
+    -std=gnu++17
+    -DESP32S3
+    -DARDUINO_M5STACK_STICK_S3
+    -DBOARD_HAS_PSRAM
+    -mfix-esp32-psram-cache-issue
+    -DCORE_DEBUG_LEVEL=3
     -DARDUINO_USB_CDC_ON_BOOT=1
     -DARDUINO_USB_MODE=1
-    -DCORE_DEBUG_LEVEL=3
 
-; Partition Table Allocation (Default 8MB SPI Flash)
-board_build.arduino.memory_type = qio_qspi
-board_upload.flash_size = 8MB
-board_upload.maximum_size = 8388608
-
+; --- Dependencies ---
+lib_deps =
+    M5Unified=https://github.com/m5stack/M5Unified
+    M5GFX=https://github.com/m5stack/M5GFX
+    M5PM1=https://github.com/m5stack/M5PM1
 ```
 
 ### Explanation of Critical Build Flags
