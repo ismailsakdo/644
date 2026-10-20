@@ -212,10 +212,10 @@ Create a verification script on your computer: `tools/cloud_validation_harness.p
 
 ```python
 #!/usr/bin/env python3
-"""
-M5Stack Stick S3 Journey - Lesson 02: Cloud Telemetry Test Harness
-Emulates an edge device sending time-series data to ThingSpeak and Google Forms.
-"""
+#"""
+#M5Stack Stick S3 Journey - Lesson 02: Cloud Telemetry Test Harness
+#Emulates an edge device sending time-series data to ThingSpeak and Google Forms.
+#"""
 
 import time
 import math
