@@ -1,1 +1,11 @@
-Lesson 1: Setting Up the Software & Development EnvironmentCore Focus: Establishing a reproducible, enterprise-ready embedded development pipeline on Visual Studio Code and PlatformIO.Business & Academic Linkage: Hardware development platforms, embedded toolchains, and zero-cost open-source developer tooling (ADE644 Lesson 6).   Hands-On Activities & ProceduresVS Code & PlatformIO IDE Installation:Download and install the latest stable build of Visual Studio Code.Open the VS Code Extensions Marketplace (Ctrl+Shift+X / Cmd+Shift+X), search for PlatformIO IDE, and install. Allow the PlatformIO Core CLI engine to complete initialization.USB Drivers & Port Enumeration:Install the Espressif ESP32-S3 USB CDC drivers (or CH9102/CP210x virtual COM drivers depending on OS).Connect the M5Stick S3 to the host workstation via a high-quality USB-C data cable.Open the OS Device Manager (Windows) or execute ls /dev/tty* (macOS/Linux) to verify that a valid COM port appears (e.g., COM5 or /dev/ttyACM0).Git & Environment Verification:Verify Git CLI is installed: git --version.Create a local project root directory: M5StickS3_IoT_Journey/.Deliverable Checkpoint: Screenshot of PlatformIO Home screen detecting the connected ESP32-S3 COM port and active toolchain terminal.
+M5Stack Stick S3 IoT Engineering & Business Curriculum (Lessons 1–15)
+
+This technical curriculum provides an end-to-end hands-on pathway for building, securing, and deploying enterprise-grade Internet of Things systems using the M5Stack Stick S3 (ESP32-S3). The technical progression aligns with the Master of Business Administration (MBA) IoT for Business curriculum (ADE644/AGE644).
+
+Hardware & Toolchain Reference
+
+1) Microcontroller: ESP32-S3-PICO-1 (Dual-core Xtensa LX7 @ 240 MHz, 2.4 GHz Wi-Fi, BLE 5.0)
+2) Onboard Peripherals: 1.14" ST7789v2 LCD (135x240), BMI270 6-axis IMU, SPM1423 PDM microphone, AXP2101 PMIC, RTC, IR transmitter, 2x user buttons (BtnA, BtnB)
+3) Expansion: 1x Grove I2C/GPIO port, 8-pin extended GPIO header
+4) Core IDE: Visual Studio Code with PlatformIO Core CLI
+5) Language & Framework: Embedded C++ / Arduino Framework via Espressif32 Platform
