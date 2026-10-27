@@ -98,7 +98,7 @@ Configure the 1.14-inch ST7789 TFT display (135 $\times$ 240 resolution), rotate
 ```cpp
 /**
  * ============================================================================
- * Exercise 4.1: ST7789 Color LCD Graphics & HMI Formatting
+ * Exercise 4.1: ST7789 Color LCD Graphics & HMI Formatting (M5StickS3 Fixed)
  * ============================================================================
  */
 #include <M5Unified.h>
@@ -106,8 +106,12 @@ Configure the 1.14-inch ST7789 TFT display (135 $\times$ 240 resolution), rotate
 static uint32_t screen_refresh_counter = 0;
 
 void setup() {
+    // Initialize M5 Unified hardware architecture
     auto cfg = M5.config();
     M5.begin(cfg);
+
+    // CRITICAL: Force the ST7789 display backlight active and set brightness (0 - 255)
+    M5.Display.setBrightness(200);
 
     // Orientation 1: Landscape mode (240 width x 135 height)
     M5.Display.setRotation(1);
