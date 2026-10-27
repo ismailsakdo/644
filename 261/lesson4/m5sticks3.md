@@ -48,9 +48,9 @@ Update `platformio.ini` to declare **`M5Unified`** under `lib_deps`. PlatformIO 
 
 ```ini
 [platformio]
-default_envs = m5sticks3
+default_envs = m5stack-s3
 
-[env:m5sticks3]
+[env:m5stack-s3]
 platform = espressif32@6.12.0
 board = esp32-s3-devkitc-1
 framework = arduino
