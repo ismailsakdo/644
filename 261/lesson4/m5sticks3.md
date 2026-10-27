@@ -240,6 +240,7 @@ Capture physical button inputs with hardware debouncing via `M5.update()`, diffe
 /**
  * ============================================================================
  * Exercise 4.2: Hardware Interaction — Button Handlers & Acoustic Transducer
+ * Hardware Target: M5Stack StickS3 (ESP32-S3 / ST7789P3, 240x135 Landscape)
  * ============================================================================
  */
 #include <M5Unified.h>
@@ -249,15 +250,19 @@ static bool alarm_mode_active = false;
 
 void drawInterface() {
     M5.Display.fillScreen(TFT_BLACK);
+    
+    // Header Banner (240x24 pixels)
     M5.Display.fillRect(0, 0, 240, 24, TFT_DARKCYAN);
     M5.Display.setTextColor(TFT_WHITE, TFT_DARKCYAN);
     M5.Display.setTextDatum(textdatum_t::middle_center);
     M5.Display.drawString("BUTTON & BUZZER DEMO", 120, 12);
 
+    // Static Instructions
     M5.Display.setTextColor(TFT_LIGHTGRAY, TFT_BLACK);
     M5.Display.drawString("BtnA (Front): Audit Count", 120, 45);
     M5.Display.drawString("BtnB (Side): Reset / Hold", 120, 62);
 
+    // Dynamic Metric Readout Field
     M5.Display.setTextColor(TFT_YELLOW, TFT_BLACK);
     M5.Display.setTextSize(2);
     M5.Display.drawString("Audits: " + String(manual_audit_count), 120, 95);
@@ -268,29 +273,34 @@ void setup() {
     auto cfg = M5.config();
     M5.begin(cfg);
 
+    // CRITICAL: Configure for 240x135 Landscape Orientation
     M5.Display.setRotation(1);
+    M5.Display.setBrightness(180);
+    
     drawInterface();
 }
 
 void loop() {
-    // REQUIRED: Updates button states and internal debounce timers
+    // REQUIRED: Updates button states and internal debounce timers every cycle
     M5.update();
 
-    // 1. Process Button A (Front "M5" Panel)
+    // 1. Process Button A (Front "M5" Panel Button)
     if (M5.BtnA.wasClicked()) {
         manual_audit_count++;
         
         // Acoustic feedback: 1000 Hz tone for 100 ms
         M5.Speaker.tone(1000, 100);
 
-        // Update display
+        // Targeted UI update for audit count to avoid full-screen refresh flicker
+        M5.Display.fillRect(0, 80, 240, 30, TFT_BLACK);
         M5.Display.setTextColor(TFT_YELLOW, TFT_BLACK);
         M5.Display.setTextSize(2);
+        M5.Display.setTextDatum(textdatum_t::middle_center);
         M5.Display.drawString("Audits: " + String(manual_audit_count), 120, 95);
         M5.Display.setTextSize(1);
     }
 
-    // 2. Process Button B (Side Edge) - Click vs. Hold
+    // 2. Process Button B (Side Edge Button) - Click Event
     if (M5.BtnB.wasClicked()) {
         manual_audit_count = 0;
         
@@ -299,25 +309,30 @@ void loop() {
         delay(60);
         M5.Speaker.tone(3000, 50);
 
+        // Redraw base UI layout
         drawInterface();
+        alarm_mode_active = false; // Reset alarm state on counter reset
     }
 
+    // 3. Process Button B (Side Edge Button) - Hold Event
     if (M5.BtnB.wasHold()) {
         alarm_mode_active = !alarm_mode_active;
 
         if (alarm_mode_active) {
-            // Alarm activation sound
+            // Alarm activation sound & visual banner
             M5.Speaker.tone(800, 300);
-            M5.Display.fillRect(0, 115, 240, 20, TFT_RED);
+            M5.Display.fillRect(0, 112, 240, 23, TFT_RED);
             M5.Display.setTextColor(TFT_WHITE, TFT_RED);
-            M5.Display.drawString("!! SIREN MODE ACTIVE !!", 120, 125);
+            M5.Display.setTextDatum(textdatum_t::middle_center);
+            M5.Display.drawString("!! SIREN MODE ACTIVE !!", 120, 123);
         } else {
+            // Deactivation confirmation
             M5.Speaker.tone(400, 200);
-            M5.Display.fillRect(0, 115, 240, 20, TFT_BLACK);
+            M5.Display.fillRect(0, 112, 240, 23, TFT_BLACK);
         }
     }
 
-    delay(20);
+    delay(20); // Maintain stable poll rate and reduce CPU idle load
 }
 
 ```
