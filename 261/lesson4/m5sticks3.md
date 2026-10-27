@@ -361,95 +361,143 @@ $$\Vert{}A\Vert{} = \sqrt{a_x^2 + a_y^2 + a_z^2}$$
 
 ```cpp
 /**
+
  * ============================================================================
- * Enterprise Flicker-Free & Overlap-Free HMI Engine for M5Stack StickS3
- * Hardware Target: ESP32-S3 / ST7789P3 (240x135 Landscape)
+
+ * Exercise 4.3: Real Motion Sensing with the BMI270 IMU
+
  * ============================================================================
+
  */
-#include <Arduino.h>
+
 #include <M5Unified.h>
 
-static uint32_t telemetry_counter = 0;
-static unsigned long previous_millis = 0;
+#include <math.h>
 
-void drawStaticLayout() {
-    // 1. Clear background to deep slate
-    M5.Display.fillScreen(0x1084);
 
-    // 2. Header Banner (240x22 pixels)
-    M5.Display.fillRect(0, 0, 240, 22, TFT_NAVY);
-    M5.Display.setTextColor(TFT_WHITE, TFT_NAVY);
-    M5.Display.setTextDatum(textdatum_t::middle_center);
-    M5.Display.drawString("M5STICK-S3 EDGE TELEMETRY", 120, 11, &fonts::Font2);
 
-    // 3. Static Field Labels (Left Column)
-    M5.Display.setTextColor(TFT_LIGHTGRAY, 0x1084);
-    M5.Display.setTextDatum(textdatum_t::top_left);
-    M5.Display.drawString("STATUS:", 10, 32, &fonts::Font0);
-    M5.Display.drawString("COUNTER:", 10, 52, &fonts::Font0);
-    M5.Display.drawString("UPTIME:", 10, 72, &fonts::Font0);
+const float IMPACT_THRESHOLD_G = 1.65f;
 
-    // 4. Horizontal Separator Bar
-    M5.Display.drawFastHLine(10, 95, 220, TFT_DARKGRAY);
-}
+
 
 void setup() {
-    Serial.begin(115200);
 
     auto cfg = M5.config();
+
     M5.begin(cfg);
 
-    // CRITICAL: Configure for 240x135 Landscape Mode
-    M5.Display.setRotation(1);
-    M5.Display.setBrightness(180);
 
-    drawStaticLayout();
+
+    M5.Display.setRotation(1);
+
+    M5.Display.fillScreen(TFT_BLACK);
+
+
+
+    M5.Display.fillRect(0, 0, 240, 22, TFT_MAROON);
+
+    M5.Display.setTextColor(TFT_WHITE, TFT_MAROON);
+
+    M5.Display.setTextDatum(textdatum_t::middle_center);
+
+    M5.Display.drawString("BMI270 REAL-TIME IMU", 120, 11);
+
 }
 
+
+
 void loop() {
+
     M5.update();
-    telemetry_counter++;
 
-    // --- DYNAMIC UPDATE ZONES (Strict Bounding Box Clearing to Prevent Overlap) ---
 
-    // Zone 1: Status Indicator (Row Y: 32)
-    // Clear exact bounding box before drawing new text
-    M5.Display.fillRect(75, 32, 150, 14, 0x1084);
+
+    // Data structures for 3-axis linear acceleration & angular velocity
+
+    float ax, ay, az;
+
+    float gx, gy, gz;
+
+
+
+    // Read real hardware registers via M5Unified
+
+    M5.Imu.getAccel(&ax, &ay, &az);
+
+    M5.Imu.getGyro(&gx, &gy, &gz);
+
+
+
+    // Calculate total acceleration vector magnitude
+
+    float total_magnitude = sqrtf((ax * ax) + (ay * ay) + (az * az));
+
+
+
+    // Dynamic Screen Output
+
     M5.Display.setTextDatum(textdatum_t::top_left);
-    if ((telemetry_counter / 10) % 2 == 0) {
-        M5.Display.setTextColor(TFT_GREENYELLOW, 0x1084);
-        M5.Display.drawString("RUNNING [OK]", 75, 32, &fonts::Font0);
+
+    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+
+    M5.Display.setCursor(10, 30);
+
+    M5.Display.printf("AccX: %+5.2f G   GyroX: %+6.1f d/s\n", ax, gx);
+
+    M5.Display.setCursor(10, 48);
+
+    M5.Display.printf("AccY: %+5.2f G   GyroY: %+6.1f d/s\n", ay, gy);
+
+    M5.Display.setCursor(10, 66);
+
+    M5.Display.printf("AccZ: %+5.2f G   GyroZ: %+6.1f d/s\n", az, gz);
+
+
+
+    // Threshold Alert Banner
+
+    M5.Display.setTextDatum(textdatum_t::middle_center);
+
+    if (total_magnitude > IMPACT_THRESHOLD_G) {
+
+        M5.Display.fillRect(10, 88, 220, 40, TFT_RED);
+
+        M5.Display.setTextColor(TFT_WHITE, TFT_RED);
+
+        M5.Display.setTextSize(2);
+
+        M5.Display.drawString("SHOCK DETECTED", 120, 102);
+
+        M5.Display.setTextSize(1);
+
+        M5.Display.drawString(String(total_magnitude, 2) + " G EXCEEDED", 120, 120);
+
+
+
+        // Audible Warning
+
+        M5.Speaker.tone(1800, 40);
+
     } else {
-        M5.Display.setTextColor(TFT_ORANGE, 0x1084);
-        M5.Display.drawString("PROCESSING...", 75, 32, &fonts::Font0);
+
+        M5.Display.fillRect(10, 88, 220, 40, TFT_DARKGREEN);
+
+        M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
+
+        M5.Display.setTextSize(1);
+
+        M5.Display.drawString("MOTION NOMINAL", 120, 100);
+
+        M5.Display.setTextSize(2);
+
+        M5.Display.drawString(String(total_magnitude, 2) + " G", 120, 116);
+
     }
 
-    // Zone 2: Fixed-Width Counter (Row Y: 52)
-    // Using snprintf with zero padding (%06u) guarantees identical string length, eliminating ghosting
-    char counter_buf[16];
-    snprintf(counter_buf, sizeof(counter_buf), "%06u", telemetry_counter);
-    
-    M5.Display.fillRect(75, 52, 120, 14, 0x1084);
-    M5.Display.setTextColor(TFT_CYAN, 0x1084);
-    M5.Display.drawString(counter_buf, 75, 52, &fonts::Font0);
 
-    // Zone 3: Uptime Clock (Row Y: 72)
-    unsigned long seconds = millis() / 1000;
-    unsigned long minutes = seconds / 60;
-    char time_buf[16];
-    snprintf(time_buf, sizeof(time_buf), "%02lu:%02lu:%02lu", (minutes / 60) % 24, minutes % 60, seconds % 60);
 
-    M5.Display.fillRect(75, 72, 100, 14, 0x1084);
-    M5.Display.setTextColor(TFT_WHITE, 0x1084);
-    M5.Display.drawString(time_buf, 75, 72, &fonts::Font0);
+    delay(50); // ~20 Hz Refresh Rate
 
-    // Zone 4: Graphical Progress Bar (Y: 105 to 125)
-    int progress_width = (telemetry_counter % 100) * 2; // Scales 0 to 200px max width
-    M5.Display.drawRect(20, 105, 200, 12, TFT_DARKGRAY);
-    M5.Display.fillRect(21, 106, progress_width, 10, TFT_BLUE);
-    M5.Display.fillRect(21 + progress_width, 106, 198 - progress_width, 10, 0x1084);
-
-    delay(100); // Stable 10Hz refresh pacing
 }
 
 ```
