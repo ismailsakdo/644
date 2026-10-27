@@ -47,30 +47,32 @@ cd lesson04-hardware-peripherals
 Update `platformio.ini` to declare **`M5Unified`** under `lib_deps`. PlatformIO handles downloading, compiling, and linking the peripheral drivers automatically.
 
 ```ini
-; =====================================================================
-; PlatformIO Configuration: M5Stack StickS3 HMI Firmware
-; Board: M5Stack StickS3 (ESP32-S3-PICO-1-N8R8)
-; =====================================================================
+[platformio]
+default_envs = m5sticks3
 
-[env:m5stack-s3]
-platform = espressif32
+[env:m5sticks3]
+platform = espressif32@6.12.0
 board = esp32-s3-devkitc-1
 framework = arduino
-
-; Serial Monitor & Upload Speeds
 monitor_speed = 115200
 upload_speed = 921600
 
-; Native USB CDC Routing & PSRAM Flags (StickS3 includes 8MB Octal PSRAM)
-build_flags = 
+board_build.f_cpu = 240000000L
+board_build.flash_size = 8MB
+board_upload.flash_size = 8MB
+board_build.partitions = default_8MB.csv
+board_build.filesystem = littlefs
+
+build_flags =
+    -std=gnu++17
+    -DESP32S3
+    -DARDUINO_M5STACK_STICK_S3
     -DARDUINO_USB_CDC_ON_BOOT=1
     -DARDUINO_USB_MODE=1
-    -DBOARD_HAS_PSRAM
-    -mfix-esp32-psram-cache-issue
+    -O3
 
-; External Hardware Abstraction Library
-lib_deps = 
-    m5stack/M5Unified @ ^0.1.16
+lib_deps =
+    M5Unified=https://github.com/m5stack/M5Unified
 
 ```
 
@@ -100,76 +102,101 @@ Configure the 1.14-inch ST7789 TFT display (135 $\times$ 240 resolution), rotate
 ```cpp
 /**
  * ============================================================================
- * M5StickS3 Enterprise HMI Graphics & Telemetry Engine (240x135 Landscape)
- * Hardware Target: M5Stack StickS3 (ESP32-S3 / ST7789P3)
+ * M5Stack StickS3 High-Performance Display & HMI Rendering Engine
+ * Target: ST7789P3 IPS LCD (240x135 Landscape)
  * ============================================================================
  */
+#include <Arduino.h>
 #include <M5Unified.h>
 
-static uint32_t screen_refresh_counter = 0;
+static uint32_t frame_counter = 0;
+static unsigned long previous_millis = 0;
+static float current_fps = 0.0f;
+
+void renderStaticLayout() {
+    // 1. Clear screen with deep dark slate background
+    M5.Display.fillScreen(0x1084); // Custom dark gray/navy hex
+
+    // 2. Top Header Bar (240x22 pixels)
+    M5.Display.fillRect(0, 0, 240, 22, TFT_NAVY);
+    M5.Display.setTextColor(TFT_WHITE, TFT_NAVY);
+    M5.Display.setTextDatum(textdatum_t::middle_center);
+    M5.Display.drawString("M5STICK-S3 DISPLAY ENGINE", 120, 11, &fonts::Font2);
+
+    // 3. Divider line
+    M5.Display.drawFastHLine(10, 28, 220, TFT_DARKGRAY);
+
+    // 4. Static Labels for Dynamic Zones
+    M5.Display.setTextColor(TFT_LIGHTGRAY, 0x1084);
+    M5.Display.setTextDatum(textdatum_t::top_left);
+    M5.Display.drawString("FRAME:", 15, 38, &fonts::Font0);
+    M5.Display.drawString("FPS:", 135, 38, &fonts::Font0);
+    M5.Display.drawString("UPTIME:", 15, 60, &fonts::Font0);
+}
 
 void setup() {
+    Serial.begin(115200);
+
+    // Initialize M5Stack StickS3 Hardware
     auto cfg = M5.config();
     M5.begin(cfg);
 
-    // CRITICAL: Turn on backlight brightness (Range: 0 - 255)
-    M5.Display.setBrightness(200);
+    // CRITICAL: Configure for 240x135 Landscape Mode
+    M5.Display.setRotation(1);
+    M5.Display.setBrightness(180);
 
-    // Set Landscape Mode: M5StickS3 native is 135x240; rotation 1/3 gives 240x135
-    M5.Display.setRotation(1); 
-    M5.Display.fillScreen(TFT_BLACK);
-
-    // Header Canvas (240x20 pixels)
-    M5.Display.fillRect(0, 0, 240, 20, TFT_NAVY);
-    M5.Display.setTextColor(TFT_WHITE, TFT_NAVY);
-    M5.Display.setTextDatum(textdatum_t::middle_center);
-    M5.Display.setTextSize(1);
-    M5.Display.drawString("M5STICK-S3: ENTERPRISE HMI", 120, 10);
-
-    // Static Column Labels (Spread across 240px width)
-    M5.Display.setTextColor(TFT_DARKGRAY, TFT_BLACK);
-    M5.Display.drawString("VAL", 40, 32);
-    M5.Display.drawString("STAT", 120, 32);
-    M5.Display.drawString("UPTIME", 200, 32);
-
-    // Horizontal Divider Line
-    M5.Display.drawFastHLine(10, 42, 220, TFT_DARKGRAY);
+    // Render the initial static chrome
+    renderStaticLayout();
 }
 
 void loop() {
     M5.update();
-    screen_refresh_counter++;
+    frame_counter++;
 
-    // Dynamic Telemetry Output (Text size 1)
-    M5.Display.setTextSize(1);
-    M5.Display.setTextDatum(textdatum_t::middle_center);
-
-    // Metric 1: System Counter (Column 1)
-    M5.Display.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-    M5.Display.drawNumber(screen_refresh_counter, 40, 65);
-
-    // Metric 2: Status Indicator (Column 2)
-    if (screen_refresh_counter % 10 > 5) {
-        M5.Display.setTextColor(TFT_ORANGE, TFT_BLACK);
-        M5.Display.drawString("BUSY", 120, 65);
-    } else {
-        M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
-        M5.Display.drawString("IDLE", 120, 65);
+    // Calculate real-time FPS every second
+    unsigned long current_millis = millis();
+    if (current_millis - previous_millis >= 1000) {
+        current_fps = (frame_counter * 1000.0f) / (current_millis - previous_millis);
+        frame_counter = 0;
+        previous_millis = current_millis;
     }
 
-    // Metric 3: Uptime in Seconds (Column 3)
-    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    M5.Display.drawFloat(millis() / 1000.0f, 1, 200, 65);
+    // --- Dynamic Data Update Zones (Targeted Refresh to prevent flicker) ---
 
-    // Bottom Decorative Progress Bar (Scaled to fit 220px width cleanly)
-    int progress_val = screen_refresh_counter % 100;
-    int bar_width = (progress_val * 220) / 100; // Scaled max 220px width
+    // Zone 1: Frame Count
+    M5.Display.fillRect(65, 36, 60, 14, 0x1084);
+    M5.Display.setTextColor(TFT_GREENYELLOW, 0x1084);
+    M5.Display.setTextDatum(textdatum_t::top_left);
+    M5.Display.drawString(String(frame_counter), 65, 36, &fonts::Font0);
+
+    // Zone 2: FPS Tracker
+    M5.Display.fillRect(165, 36, 60, 14, 0x1084);
+    M5.Display.setTextColor(TFT_CYAN, 0x1084);
+    M5.Display.drawString(String(current_fps, 1), 165, 36, &fonts::Font0);
+
+    // Zone 3: Uptime Clock
+    uint32_t seconds = millis() / 1000;
+    uint32_t minutes = seconds / 60;
+    char time_buffer[16];
+    snprintf(time_buffer, sizeof(time_buffer), "%02u:%02u:%02u", (minutes / 60) % 24, minutes % 60, seconds % 60);
     
-    M5.Display.drawRect(10, 95, 220, 12, TFT_WHITE);
-    M5.Display.fillRect(11, 96, bar_width, 10, TFT_GREEN);
-    M5.Display.fillRect(11 + bar_width, 96, 220 - bar_width, 10, TFT_BLACK);
+    M5.Display.fillRect(75, 58, 100, 16, 0x1084);
+    M5.Display.setTextColor(TFT_WHITE, 0x1084);
+    M5.Display.drawString(time_buffer, 75, 58, &fonts::Font2);
 
-    delay(200);
+    // Zone 4: Dynamic Graphical Progress Bar
+    int bar_progress = (millis() / 50) % 220; // Loops every 11 seconds across 220px
+    M5.Display.drawRect(10, 85, 220, 14, TFT_DARKGRAY);
+    M5.Display.fillRect(11, 86, bar_progress, 12, TFT_BLUE);
+    M5.Display.fillRect(11 + bar_progress, 86, 218 - bar_progress, 12, TFT_BLACK);
+
+    // Zone 5: Random Primitive Stress Test (Visualizing graphics hardware acceleration)
+    int rx = 20 + (rand() % 200);
+    int ry = 105 + (rand() % 20);
+    uint16_t rcolor = rand();
+    M5.Display.fillCircle(rx, ry, 4, rcolor);
+
+    delay(33); // Target ~30 FPS frame pacing
 }
 
 ```
