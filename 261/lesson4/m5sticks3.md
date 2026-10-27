@@ -48,8 +48,8 @@ Update `platformio.ini` to declare **`M5Unified`** under `lib_deps`. PlatformIO 
 
 ```ini
 ; =====================================================================
-; PlatformIO Configuration: Lesson 04 - Physical Hardware Peripherals
-; Board: M5Stack Stick S3 (ESP32-S3)
+; PlatformIO Configuration: M5Stack StickS3 HMI Firmware
+; Board: M5Stack StickS3 (ESP32-S3-PICO-1-N8R8)
 ; =====================================================================
 
 [env:m5stack-s3]
@@ -61,10 +61,12 @@ framework = arduino
 monitor_speed = 115200
 upload_speed = 921600
 
-; Native USB CDC Routing Flags
+; Native USB CDC Routing & PSRAM Flags (StickS3 includes 8MB Octal PSRAM)
 build_flags = 
     -DARDUINO_USB_CDC_ON_BOOT=1
     -DARDUINO_USB_MODE=1
+    -DBOARD_HAS_PSRAM
+    -mfix-esp32-psram-cache-issue
 
 ; External Hardware Abstraction Library
 lib_deps = 
@@ -98,7 +100,8 @@ Configure the 1.14-inch ST7789 TFT display (135 $\times$ 240 resolution), rotate
 ```cpp
 /**
  * ============================================================================
- * Exercise 4.1: ST7789 Color LCD Graphics & HMI Formatting (M5StickS3 160x80)
+ * M5StickS3 Enterprise HMI Graphics & Telemetry Engine (240x135 Landscape)
+ * Hardware Target: M5Stack StickS3 (ESP32-S3 / ST7789P3)
  * ============================================================================
  */
 #include <M5Unified.h>
@@ -109,60 +112,62 @@ void setup() {
     auto cfg = M5.config();
     M5.begin(cfg);
 
-    // CRITICAL: Turn on backlight brightness (0 - 255)
+    // CRITICAL: Turn on backlight brightness (Range: 0 - 255)
     M5.Display.setBrightness(200);
 
-    // Orientation 1: Landscape mode for M5StickS3 (160 width x 80 height)
-    M5.Display.setRotation(1);
+    // Set Landscape Mode: M5StickS3 native is 135x240; rotation 1/3 gives 240x135
+    M5.Display.setRotation(1); 
     M5.Display.fillScreen(TFT_BLACK);
 
-    // Header Canvas (160x16)
-    M5.Display.fillRect(0, 0, 160, 16, TFT_NAVY);
+    // Header Canvas (240x20 pixels)
+    M5.Display.fillRect(0, 0, 240, 20, TFT_NAVY);
     M5.Display.setTextColor(TFT_WHITE, TFT_NAVY);
     M5.Display.setTextDatum(textdatum_t::middle_center);
     M5.Display.setTextSize(1);
-    M5.Display.drawString("M5STICK S3: HMI", 80, 8);
+    M5.Display.drawString("M5STICK-S3: ENTERPRISE HMI", 120, 10);
 
-    // Static Labels (Scaled for 160px width)
+    // Static Column Labels (Spread across 240px width)
     M5.Display.setTextColor(TFT_DARKGRAY, TFT_BLACK);
-    M5.Display.drawString("VAL", 30, 26);
-    M5.Display.drawString("STAT", 80, 26);
-    M5.Display.drawString("UPTIME", 130, 26);
+    M5.Display.drawString("VAL", 40, 32);
+    M5.Display.drawString("STAT", 120, 32);
+    M5.Display.drawString("UPTIME", 200, 32);
 
-    // Horizontal Divider
-    M5.Display.drawFastHLine(5, 34, 150, TFT_DARKGRAY);
+    // Horizontal Divider Line
+    M5.Display.drawFastHLine(10, 42, 220, TFT_DARKGRAY);
 }
 
 void loop() {
     M5.update();
     screen_refresh_counter++;
 
-    // Dynamic Telemetry Output (Text size 1 fits cleanly in 160x80)
+    // Dynamic Telemetry Output (Text size 1)
     M5.Display.setTextSize(1);
     M5.Display.setTextDatum(textdatum_t::middle_center);
 
-    // Metric 1: System Counter
+    // Metric 1: System Counter (Column 1)
     M5.Display.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-    M5.Display.drawNumber(screen_refresh_counter, 30, 48);
+    M5.Display.drawNumber(screen_refresh_counter, 40, 65);
 
-    // Metric 2: Status Indicator
+    // Metric 2: Status Indicator (Column 2)
     if (screen_refresh_counter % 10 > 5) {
         M5.Display.setTextColor(TFT_ORANGE, TFT_BLACK);
-        M5.Display.drawString("BUSY", 80, 48);
+        M5.Display.drawString("BUSY", 120, 65);
     } else {
         M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
-        M5.Display.drawString("IDLE", 80, 48);
+        M5.Display.drawString("IDLE", 120, 65);
     }
 
-    // Metric 3: Uptime in Seconds
+    // Metric 3: Uptime in Seconds (Column 3)
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    M5.Display.drawFloat(millis() / 1000.0f, 1, 130, 48);
+    M5.Display.drawFloat(millis() / 1000.0f, 1, 200, 65);
 
-    // Bottom Decorative Progress Bar (Scaled to fit 150px width)
-    int bar_width = (screen_refresh_counter % 100) * 1.5; // 100 * 1.5 = 150 max
-    M5.Display.drawRect(5, 62, 150, 10, TFT_WHITE);
-    M5.Display.fillRect(6, 63, bar_width, 8, TFT_GREEN);
-    M5.Display.fillRect(6 + bar_width, 63, 148 - bar_width, 8, TFT_BLACK);
+    // Bottom Decorative Progress Bar (Scaled to fit 220px width cleanly)
+    int progress_val = screen_refresh_counter % 100;
+    int bar_width = (progress_val * 220) / 100; // Scaled max 220px width
+    
+    M5.Display.drawRect(10, 95, 220, 12, TFT_WHITE);
+    M5.Display.fillRect(11, 96, bar_width, 10, TFT_GREEN);
+    M5.Display.fillRect(11 + bar_width, 96, 220 - bar_width, 10, TFT_BLACK);
 
     delay(200);
 }
