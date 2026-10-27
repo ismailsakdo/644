@@ -98,7 +98,7 @@ Configure the 1.14-inch ST7789 TFT display (135 $\times$ 240 resolution), rotate
 ```cpp
 /**
  * ============================================================================
- * Exercise 4.1: ST7789 Color LCD Graphics & HMI Formatting (M5StickS3 Fixed)
+ * Exercise 4.1: ST7789 Color LCD Graphics & HMI Formatting (M5StickS3 160x80)
  * ============================================================================
  */
 #include <M5Unified.h>
@@ -106,64 +106,63 @@ Configure the 1.14-inch ST7789 TFT display (135 $\times$ 240 resolution), rotate
 static uint32_t screen_refresh_counter = 0;
 
 void setup() {
-    // Initialize M5 Unified hardware architecture
     auto cfg = M5.config();
     M5.begin(cfg);
 
-    // CRITICAL: Force the ST7789 display backlight active and set brightness (0 - 255)
+    // CRITICAL: Turn on backlight brightness (0 - 255)
     M5.Display.setBrightness(200);
 
-    // Orientation 1: Landscape mode (240 width x 135 height)
+    // Orientation 1: Landscape mode for M5StickS3 (160 width x 80 height)
     M5.Display.setRotation(1);
     M5.Display.fillScreen(TFT_BLACK);
 
-    // Header Canvas
-    M5.Display.fillRect(0, 0, 240, 26, TFT_NAVY);
+    // Header Canvas (160x16)
+    M5.Display.fillRect(0, 0, 160, 16, TFT_NAVY);
     M5.Display.setTextColor(TFT_WHITE, TFT_NAVY);
     M5.Display.setTextDatum(textdatum_t::middle_center);
     M5.Display.setTextSize(1);
-    M5.Display.drawString("M5STICK S3: HMI ENGINE", 120, 13);
+    M5.Display.drawString("M5STICK S3: HMI", 80, 8);
 
-    // Static Labels (Rendered once to prevent graphical flicker)
+    // Static Labels (Scaled for 160px width)
     M5.Display.setTextColor(TFT_DARKGRAY, TFT_BLACK);
-    M5.Display.drawString("METRIC", 45, 42);
-    M5.Display.drawString("STATUS", 120, 42);
-    M5.Display.drawString("REFRESH", 195, 42);
+    M5.Display.drawString("VAL", 30, 26);
+    M5.Display.drawString("STAT", 80, 26);
+    M5.Display.drawString("UPTIME", 130, 26);
 
     // Horizontal Divider
-    M5.Display.drawFastHLine(10, 52, 220, TFT_DARKGRAY);
+    M5.Display.drawFastHLine(5, 34, 150, TFT_DARKGRAY);
 }
 
 void loop() {
     M5.update();
     screen_refresh_counter++;
 
-    // Dynamic Telemetry Output (Text color + Background color clears old digits)
-    M5.Display.setTextSize(2);
+    // Dynamic Telemetry Output (Text size 1 fits cleanly in 160x80)
+    M5.Display.setTextSize(1);
     M5.Display.setTextDatum(textdatum_t::middle_center);
 
     // Metric 1: System Counter
     M5.Display.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-    M5.Display.drawNumber(screen_refresh_counter, 45, 75);
+    M5.Display.drawNumber(screen_refresh_counter, 30, 48);
 
     // Metric 2: Status Indicator
     if (screen_refresh_counter % 10 > 5) {
         M5.Display.setTextColor(TFT_ORANGE, TFT_BLACK);
-        M5.Display.drawString("BUSY", 120, 75);
+        M5.Display.drawString("BUSY", 80, 48);
     } else {
         M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
-        M5.Display.drawString("IDLE", 120, 75);
+        M5.Display.drawString("IDLE", 80, 48);
     }
 
     // Metric 3: Uptime in Seconds
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    M5.Display.drawFloat(millis() / 1000.0f, 1, 195, 75);
+    M5.Display.drawFloat(millis() / 1000.0f, 1, 130, 48);
 
-    // Bottom Decorative Battery / Progress Bar
-    int bar_width = (screen_refresh_counter % 100) * 2.2;
-    M5.Display.drawRect(10, 105, 220, 15, TFT_WHITE);
-    M5.Display.fillRect(12, 107, bar_width, 11, TFT_GREEN);
-    M5.Display.fillRect(12 + bar_width, 107, 216 - bar_width, 11, TFT_BLACK);
+    // Bottom Decorative Progress Bar (Scaled to fit 150px width)
+    int bar_width = (screen_refresh_counter % 100) * 1.5; // 100 * 1.5 = 150 max
+    M5.Display.drawRect(5, 62, 150, 10, TFT_WHITE);
+    M5.Display.fillRect(6, 63, bar_width, 8, TFT_GREEN);
+    M5.Display.fillRect(6 + bar_width, 63, 148 - bar_width, 8, TFT_BLACK);
 
     delay(200);
 }
