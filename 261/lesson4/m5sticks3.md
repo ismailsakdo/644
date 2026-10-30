@@ -639,8 +639,9 @@ Where $\text{TxPower} = -59\text{ dBm}$ (measured reference RSSI at 1 meter) and
 ```cpp
 /**
  * ============================================================================
- * Exercise 4.5: Menu-Driven Multi-Peripheral Edge Suite
- * Hardware: M5Stack Stick S3 (LCD, IMU, SPM1423 Mic, Buzzer, Buttons, BLE)
+ * Exercise 4.5: Menu-Driven Multi-Peripheral Edge Diagnostic Suite
+ * Hardware: M5Stack Stick S3 (ST7789 LCD, BMI270, SPM1423 Mic, BLE, PMIC)
+ * Features: Silent Calibrated SLM, 6-Axis Motion, BLE Proximity Radar
  * ============================================================================
  */
 #include <Arduino.h>
@@ -660,53 +661,69 @@ enum AppState {
 };
 
 static AppState g_current_mode = MODE_MENU;
-static int g_menu_selection = 0; // 0 to 3
+static int g_menu_selection = 0;
 const int TOTAL_MENU_ITEMS = 4;
 const char* MENU_TITLES[TOTAL_MENU_ITEMS] = {
     "1. IMU VIBRATION",
-    "2. SOUND / MIC (dB)",
+    "2. SOUND LEVEL (SLM)",
     "3. BLE PHONE RADAR",
     "4. ALL-IN-ONE SUITE"
 };
 
-// Microphone Buffer & Acoustic Metrics
-static constexpr size_t MIC_SAMPLES = 128;
+// ============================================================================
+// 1. SOUND LEVEL METER (SLM) SIGNAL PROCESSING CONFIGURATION
+// ============================================================================
+// 256 samples @ 16 kHz = 16 ms acoustic frame
+static constexpr size_t MIC_SAMPLES = 256;
 static int16_t g_mic_buffer[MIC_SAMPLES];
-static float g_sound_db = 0.0f;
-static float g_peak_db = 0.0f;
 
-// BLE Proximity Variables
+// Acoustic metrics
+static float g_sound_dbspl = 35.0f;     // IEC FAST weighted dB SPL
+static float g_peak_dbspl  = 35.0f;     // Maximum peak hold (Lmax)
+static float g_raw_rms     = 0.0f;      // AC signal RMS value
+static float g_dc_bias     = 0.0f;      // Computed DC microphone offset
+
+// SPM1423 Sensitivity Calibration: -26 dBFS @ 94 dB SPL -> Offset = 120.0 dBFS
+// Full scale 16-bit integer = 32768 -> 20 * log10(32768) = 90.3 dB
+// Calibrated Factor = 120.0 - 90.3 = +29.7 dB
+static constexpr float MIC_CALIBRATION_OFFSET = 29.7f;
+
+// ============================================================================
+// 2. BLE PROXIMITY RADAR CONFIGURATION
+// ============================================================================
 static BLEScan* g_ble_scan = nullptr;
 static int g_strongest_rssi = -120;
 static String g_strongest_device_name = "None";
-static String g_strongest_device_mac = "--:--:--:--:--:--";
-static float g_estimated_distance_m = 99.9f;
+static String g_strongest_device_mac  = "--:--:--:--:--:--";
+static float g_estimated_distance_m   = 99.9f;
 static unsigned long g_last_ble_scan_ms = 0;
 static bool g_ble_scanning = false;
 
-// Custom BLE Callback Class to capture nearby advertising phones
+// BLE Callback to track the nearest mobile device
 class ProximityAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advertisedDevice) override {
         int rssi = advertisedDevice.getRSSI();
         if (rssi > g_strongest_rssi) {
             g_strongest_rssi = rssi;
             g_strongest_device_mac = advertisedDevice.getAddress().toString().c_str();
-            if (advertisedDevice.haveName()) {
+            if (advertisedDevice.haveName() && advertisedDevice.getName().length() > 0) {
                 g_strongest_device_name = advertisedDevice.getName().c_str();
             } else {
-                g_strongest_device_name = "BLE Peripheral";
+                g_strongest_device_name = "Nearby Device";
             }
         }
     }
 };
 
-// Log-distance path loss calculation: TxPower = -59 dBm @ 1m, Path Loss Exponent n = 2.0
+// Log-distance path loss: TxPower = -59 dBm @ 1m, Path Loss Exponent n = 2.0
 float calculateDistance(int rssi) {
     if (rssi <= -110 || rssi >= 0) return 99.9f;
     return powf(10.0f, ((-59.0f) - (float)rssi) / (10.0f * 2.0f));
 }
 
-// Draw Master Top Status Header
+// ============================================================================
+// 3. UI RENDERING UTILITIES
+// ============================================================================
 void drawTopHeader(const char* title, uint16_t bg_color) {
     M5.Display.fillRect(0, 0, 240, 20, bg_color);
     M5.Display.setTextColor(TFT_WHITE, bg_color);
@@ -716,13 +733,13 @@ void drawTopHeader(const char* title, uint16_t bg_color) {
 
     int bat = M5.Power.getBatteryLevel();
     char bat_str[16];
-    snprintf(bat_str, sizeof(bat_str), "%d%%", bat);
+    snprintf(bat_str, sizeof(bat_str), "%d%%", (bat < 0) ? 100 : bat);
     M5.Display.setTextDatum(textdatum_t::middle_right);
     M5.Display.drawString(bat_str, 235, 10, &fonts::Font2);
 }
 
 // ----------------------------------------------------------------------------
-// SCREEN 1: Main Selection Menu
+// MODE 0: Main Selection Menu
 // ----------------------------------------------------------------------------
 void renderMenuScreen() {
     M5.Display.fillScreen(TFT_BLACK);
@@ -745,15 +762,14 @@ void renderMenuScreen() {
         M5.Display.drawString(MENU_TITLES[i], 16, y + 10, &fonts::Font2);
     }
 
-    // Bottom Softkey Hints
     M5.Display.fillRect(0, 116, 240, 19, TFT_BLACK);
     M5.Display.setTextColor(TFT_DARKGRAY, TFT_BLACK);
     M5.Display.setTextDatum(textdatum_t::middle_center);
-    M5.Display.drawString("BtnA: Cycle [>]  |  BtnB: Enter [OK]", 120, 125, &fonts::Font0);
+    M5.Display.drawString("BtnA: Select [>]  |  BtnB: Enter [OK]", 120, 125, &fonts::Font0);
 }
 
 // ----------------------------------------------------------------------------
-// SCREEN 2: IMU Vibration Inspector
+// MODE 1: IMU 6-Axis Motion Inspector
 // ----------------------------------------------------------------------------
 void renderIMUScreen() {
     drawTopHeader("1. IMU 6-AXIS MOTION", TFT_MAROON);
@@ -777,16 +793,17 @@ void renderIMUScreen() {
     if (total_g > 1.65f) {
         M5.Display.fillRect(10, 56, 220, 48, TFT_RED);
         M5.Display.setTextColor(TFT_WHITE, TFT_RED);
-        M5.Display.drawString("SHOCK BREACH!", 120, 72, &fonts::Font2);
+        M5.Display.drawString("SHOCK DETECTED!", 120, 70, &fonts::Font2);
         snprintf(buf, sizeof(buf), "Magnitude: %.2f G", total_g);
-        M5.Display.drawString(buf, 120, 92, &fonts::Font2);
-        M5.Speaker.tone(1800, 25);
+        M5.Display.drawString(buf, 120, 90, &fonts::Font2);
+        // Only emit tone in IMU mode (where microphone is idle)
+        M5.Speaker.tone(1800, 20);
     } else {
         M5.Display.fillRect(10, 56, 220, 48, TFT_DARKGREEN);
         M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
-        M5.Display.drawString("MOTION NOMINAL", 120, 72, &fonts::Font2);
+        M5.Display.drawString("MOTION NOMINAL", 120, 70, &fonts::Font2);
         snprintf(buf, sizeof(buf), "Vector: %.2f G", total_g);
-        M5.Display.drawString(buf, 120, 92, &fonts::Font2);
+        M5.Display.drawString(buf, 120, 90, &fonts::Font2);
     }
 
     M5.Display.setTextColor(TFT_DARKGRAY, TFT_BLACK);
@@ -794,72 +811,114 @@ void renderIMUScreen() {
 }
 
 // ----------------------------------------------------------------------------
-// SCREEN 3: Microphone Sound Meter & VU Bar
+// MODE 2: Digital Sound Level Meter (SLM) Engine (STRICTLY SILENT)
 // ----------------------------------------------------------------------------
-void sampleMicrophone() {
+void sampleSoundLevelMeter() {
+    // Read 256 signed 16-bit PCM samples at 16,000 Hz
     if (M5.Mic.record(g_mic_buffer, MIC_SAMPLES, 16000)) {
-        float sum = 0.0f;
+        // Step 1: Calculate DC Offset (Mean)
+        float dc_sum = 0.0f;
         for (size_t i = 0; i < MIC_SAMPLES; i++) {
-            sum += (float)g_mic_buffer[i] * (float)g_mic_buffer[i];
+            dc_sum += (float)g_mic_buffer[i];
         }
-        float rms = sqrtf(sum / (float)MIC_SAMPLES);
-        float raw_db = 20.0f * log10f(rms + 1.0f);
+        g_dc_bias = dc_sum / (float)MIC_SAMPLES;
 
-        // Smooth sound level
-        g_sound_db = (g_sound_db == 0.0f) ? raw_db : (0.75f * g_sound_db + 0.25f * raw_db);
-        if (g_sound_db > g_peak_db) {
-            g_peak_db = g_sound_db;
+        // Step 2: Subtract DC Offset and Compute AC Variance
+        float ac_sq_sum = 0.0f;
+        for (size_t i = 0; i < MIC_SAMPLES; i++) {
+            float ac_sample = (float)g_mic_buffer[i] - g_dc_bias;
+            ac_sq_sum += (ac_sample * ac_sample);
+        }
+
+        // Step 3: Compute Root Mean Square (RMS)
+        g_raw_rms = sqrtf(ac_sq_sum / (float)MIC_SAMPLES);
+        if (g_raw_rms < 1.0f) g_raw_rms = 1.0f; // Prevent log10(0)
+
+        // Step 4: Convert to calibrated decibels (dB SPL)
+        float instant_db = (20.0f * log10f(g_raw_rms)) + MIC_CALIBRATION_OFFSET;
+        instant_db = max(30.0f, min(120.0f, instant_db));
+
+        // Step 5: IEC 61672 FAST Exponential Time Weighting (Tau = 125ms)
+        // Alpha = 0.20 for smooth, non-jittery reading
+        g_sound_dbspl = (0.20f * instant_db) + (0.80f * g_sound_dbspl);
+
+        // Step 6: Peak Hold (Lmax)
+        if (g_sound_dbspl > g_peak_dbspl) {
+            g_peak_dbspl = g_sound_dbspl;
         }
     }
 }
 
 void renderMicScreen() {
-    drawTopHeader("2. SOUND LEVEL (MIC)", TFT_DARKGREEN);
+    drawTopHeader("2. SOUND LEVEL METER", TFT_DARKGREEN);
 
-    sampleMicrophone();
+    sampleSoundLevelMeter();
 
-    char buf[32];
-    M5.Display.setTextDatum(textdatum_t::middle_center);
-    snprintf(buf, sizeof(buf), "%.1f dB", g_sound_db);
-    M5.Display.setTextColor((g_sound_db > 75.0f) ? TFT_RED : TFT_GREENYELLOW, TFT_BLACK);
-    M5.Display.drawString(buf, 120, 46, &fonts::Font4);
+    // 1. Noise Classification & Theme Color
+    uint16_t state_color = TFT_GREEN;
+    const char* state_str = "QUIET";
 
-    snprintf(buf, sizeof(buf), "Peak Hold: %.1f dB", g_peak_db);
-    M5.Display.setTextColor(TFT_LIGHTGRAY, TFT_BLACK);
-    M5.Display.drawString(buf, 120, 72, &fonts::Font0);
-
-    // Segmented VU Meter Bar (200px width, 30 dB to 90 dB range)
-    int bar_x = 20, bar_y = 86, bar_w = 200, bar_h = 16;
-    M5.Display.drawRect(bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2, TFT_DARKGRAY);
-
-    float clamped_db = max(30.0f, min(90.0f, g_sound_db));
-    int fill_w = (int)((clamped_db - 30.0f) / 60.0f * bar_w);
-    uint16_t bar_color = (g_sound_db > 75.0f) ? TFT_RED : ((g_sound_db > 60.0f) ? TFT_ORANGE : TFT_GREEN);
-
-    M5.Display.fillRect(bar_x, bar_y, fill_w, bar_h, bar_color);
-    M5.Display.fillRect(bar_x + fill_w, bar_y, bar_w - fill_w, bar_h, TFT_BLACK);
-
-    if (g_sound_db > 75.0f) {
-        M5.Speaker.tone(1500, 30);
+    if (g_sound_dbspl >= 80.0f) {
+        state_color = TFT_RED;
+        state_str = "NOISE DANGER";
+    } else if (g_sound_dbspl >= 65.0f) {
+        state_color = TFT_ORANGE;
+        state_str = "ELEVATED";
+    } else if (g_sound_dbspl >= 50.0f) {
+        state_color = TFT_CYAN;
+        state_str = "NORMAL";
     }
 
+    // 2. Large Numerical Readout
+    char buf[32];
+    M5.Display.setTextDatum(textdatum_t::middle_center);
+    snprintf(buf, sizeof(buf), "%.1f dB", g_sound_dbspl);
+    M5.Display.setTextColor(state_color, TFT_BLACK);
+    M5.Display.drawString(buf, 120, 42, &fonts::Font4);
+
+    // 3. Peak Hold & Classification
+    snprintf(buf, sizeof(buf), "Peak: %.1f dB | %s", g_peak_dbspl, state_str);
+    M5.Display.setTextColor(TFT_LIGHTGRAY, TFT_BLACK);
+    M5.Display.drawString(buf, 120, 68, &fonts::Font2);
+
+    // 4. Segmented Industrial VU Meter Bar (Range: 35 dB to 95 dB)
+    int bar_x = 20, bar_y = 84, bar_w = 200, bar_h = 14;
+    M5.Display.drawRect(bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2, TFT_DARKGRAY);
+
+    float clamped_db = max(35.0f, min(95.0f, g_sound_dbspl));
+    int fill_w = (int)((clamped_db - 35.0f) / 60.0f * bar_w);
+
+    M5.Display.fillRect(bar_x, bar_y, fill_w, bar_h, state_color);
+    M5.Display.fillRect(bar_x + fill_w, bar_y, bar_w - fill_w, bar_h, TFT_BLACK);
+
+    // Peak Hold Marker Line
+    float clamped_peak = max(35.0f, min(95.0f, g_peak_dbspl));
+    int peak_x = bar_x + (int)((clamped_peak - 35.0f) / 60.0f * bar_w);
+    if (peak_x >= bar_x + bar_w) peak_x = bar_x + bar_w - 1;
+    M5.Display.drawFastVLine(peak_x, bar_y - 2, bar_h + 4, TFT_WHITE);
+
+    // 5. Diagnostics: Sub-information
+    snprintf(buf, sizeof(buf), "RMS: %-5.0f | DC Bias: %+4.0f", g_raw_rms, g_dc_bias);
     M5.Display.setTextColor(TFT_DARKGRAY, TFT_BLACK);
+    M5.Display.drawString(buf, 120, 105, &fonts::Font0);
+
+    // Instructions (NO AUDIO BEEPS)
     M5.Display.drawString("BtnA: Reset Peak  |  BtnB: Return", 120, 122, &fonts::Font0);
 }
 
 // ----------------------------------------------------------------------------
-// SCREEN 4: BLE Phone Radar (RSSI & Distance)
+// MODE 3: BLE Phone Proximity Radar
 // ----------------------------------------------------------------------------
 void updateBLERadar() {
     unsigned long current_ms = millis();
-    if (!g_ble_scanning && (current_ms - g_last_ble_scan_ms >= 2000)) {
+    if (!g_ble_scanning && (current_ms - g_last_ble_scan_ms >= 1800)) {
         g_last_ble_scan_ms = current_ms;
-        g_strongest_rssi = -120; // Reset tracking peak
-        g_ble_scan->start(1, false); // Scan for 1 second asynchronously
+        g_strongest_rssi = -120;
+        g_ble_scan->start(1, false); // 1-second non-blocking scan
         g_ble_scanning = true;
     }
 
-    if (g_ble_scanning && (current_ms - g_last_ble_scan_ms >= 1100)) {
+    if (g_ble_scanning && (current_ms - g_last_ble_scan_ms >= 1050)) {
         g_ble_scan->stop();
         g_ble_scan->clearResults();
         g_ble_scanning = false;
@@ -868,7 +927,7 @@ void updateBLERadar() {
 }
 
 void renderBLEScreen() {
-    drawTopHeader("3. BLE PROXIMITY RADAR", 0x51D7); // Purple header
+    drawTopHeader("3. BLE PHONE RADAR", 0x51D7);
 
     updateBLERadar();
 
@@ -876,23 +935,22 @@ void renderBLEScreen() {
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
 
     char buf[48];
-    snprintf(buf, sizeof(buf), "Target: %-18s", g_strongest_device_name.substring(0, 18).c_str());
+    snprintf(buf, sizeof(buf), "Device: %-18s", g_strongest_device_name.substring(0, 18).c_str());
     M5.Display.drawString(buf, 10, 26, &fonts::Font0);
 
     snprintf(buf, sizeof(buf), "MAC:    %s", g_strongest_device_mac.c_str());
     M5.Display.drawString(buf, 10, 38, &fonts::Font0);
 
-    // Dynamic Distance & RSSI Output Card
     M5.Display.setTextDatum(textdatum_t::middle_center);
     if (g_strongest_rssi > -110) {
-        const char* proximity_label = "FAR (>2m)";
+        const char* prox_label = "FAR (>2.0m)";
         uint16_t prox_color = TFT_LIGHTGRAY;
 
         if (g_estimated_distance_m < 0.5f) {
-            proximity_label = "IMMEDIATE (<0.5m)";
+            prox_label = "IMMEDIATE (<0.5m)";
             prox_color = TFT_RED;
         } else if (g_estimated_distance_m <= 2.0f) {
-            proximity_label = "NEAR (0.5m - 2m)";
+            prox_label = "NEAR (0.5m - 2.0m)";
             prox_color = TFT_YELLOW;
         }
 
@@ -904,7 +962,7 @@ void renderBLEScreen() {
         M5.Display.drawString(buf, 120, 68, &fonts::Font2);
 
         M5.Display.setTextColor(prox_color, TFT_BLACK);
-        M5.Display.drawString(proximity_label, 120, 90, &fonts::Font2);
+        M5.Display.drawString(prox_label, 120, 90, &fonts::Font2);
     } else {
         M5.Display.fillRect(10, 54, 220, 50, TFT_BLACK);
         M5.Display.drawRect(10, 54, 220, 50, TFT_DARKGRAY);
@@ -917,87 +975,84 @@ void renderBLEScreen() {
 }
 
 // ----------------------------------------------------------------------------
-// SCREEN 5: All-In-One Unified Telemetry Node
+// MODE 4: Unified All-In-One Dashboard (Visual Alerting Only)
 // ----------------------------------------------------------------------------
 void renderAllInOneScreen() {
     drawTopHeader("4. UNIFIED TELEMETRY", TFT_NAVY);
 
-    // 1. Poll IMU
+    // 1. Sample Sensors
     float ax, ay, az;
     M5.Imu.getAccel(&ax, &ay, &az);
     float total_g = sqrtf((ax * ax) + (ay * ay) + (az * az));
 
-    // 2. Poll Mic
-    sampleMicrophone();
-
-    // 3. Poll BLE Radar
+    sampleSoundLevelMeter();
     updateBLERadar();
 
-    // Grid Dividers
+    // Dividers
     M5.Display.drawFastHLine(0, 70, 240, TFT_DARKGRAY);
     M5.Display.drawFastVLine(120, 20, 94, TFT_DARKGRAY);
 
     char buf[32];
 
-    // Card 1: IMU
+    // Card 1: IMU Vibration
     M5.Display.setTextDatum(textdatum_t::top_left);
     M5.Display.setTextColor(TFT_LIGHTGRAY, TFT_BLACK);
-    M5.Display.drawString("IMU VIBRATION", 10, 25, &fonts::Font0);
+    M5.Display.drawString("VIBRATION", 10, 24, &fonts::Font0);
     snprintf(buf, sizeof(buf), "%.2f G", total_g);
-    M5.Display.setTextColor((total_g > 1.5f) ? TFT_RED : TFT_CYAN, TFT_BLACK);
-    M5.Display.drawString(buf, 10, 42, &fonts::Font4);
+    M5.Display.setTextColor((total_g > 1.50f) ? TFT_RED : TFT_CYAN, TFT_BLACK);
+    M5.Display.drawString(buf, 10, 40, &fonts::Font4);
 
-    // Card 2: SOUND
+    // Card 2: Sound Meter (SLM)
     M5.Display.setTextColor(TFT_LIGHTGRAY, TFT_BLACK);
-    M5.Display.drawString("SOUND LEVEL", 130, 25, &fonts::Font0);
-    snprintf(buf, sizeof(buf), "%.1f dB", g_sound_db);
-    M5.Display.setTextColor((g_sound_db > 75.0f) ? TFT_RED : TFT_GREENYELLOW, TFT_BLACK);
-    M5.Display.drawString(buf, 130, 42, &fonts::Font4);
+    M5.Display.drawString("SOUND (dB)", 130, 24, &fonts::Font0);
+    snprintf(buf, sizeof(buf), "%.1f dB", g_sound_dbspl);
+    M5.Display.setTextColor((g_sound_dbspl > 80.0f) ? TFT_RED : TFT_GREENYELLOW, TFT_BLACK);
+    M5.Display.drawString(buf, 130, 40, &fonts::Font4);
 
-    // Card 3: BLE DISTANCE
+    // Card 3: BLE Radar Distance
     M5.Display.setTextColor(TFT_LIGHTGRAY, TFT_BLACK);
-    M5.Display.drawString("PHONE DISTANCE", 10, 75, &fonts::Font0);
+    M5.Display.drawString("PHONE DIST", 10, 74, &fonts::Font0);
     if (g_strongest_rssi > -110) {
-        snprintf(buf, sizeof(buf), "%.1f m (%d)", g_estimated_distance_m, g_strongest_rssi);
+        snprintf(buf, sizeof(buf), "%.1fm (%d)", g_estimated_distance_m, g_strongest_rssi);
     } else {
-        snprintf(buf, sizeof(buf), "SCANNING...");
+        snprintf(buf, sizeof(buf), "SEARCHING");
     }
     M5.Display.setTextColor(TFT_MAGENTA, TFT_BLACK);
     M5.Display.drawString(buf, 10, 92, &fonts::Font2);
 
-    // Card 4: SYSTEM HEALTH
+    // Card 4: System State (Visual Only - Never Beep at Mic)
     M5.Display.setTextColor(TFT_LIGHTGRAY, TFT_BLACK);
-    M5.Display.drawString("SYSTEM STATE", 130, 75, &fonts::Font0);
-    bool alarm = (total_g > 1.5f) || (g_sound_db > 75.0f);
+    M5.Display.drawString("NODE HEALTH", 130, 74, &fonts::Font0);
+    bool alarm = (total_g > 1.50f) || (g_sound_dbspl > 80.0f);
     M5.Display.setTextColor(alarm ? TFT_RED : TFT_GREEN, TFT_BLACK);
-    M5.Display.drawString(alarm ? "ALARM !!" : "OPTIMAL", 130, 92, &fonts::Font2);
-
-    if (alarm) {
-        M5.Speaker.tone(1600, 30);
-    }
+    M5.Display.drawString(alarm ? "! ALERT !" : "OPTIMAL", 130, 92, &fonts::Font2);
 
     M5.Display.setTextDatum(textdatum_t::middle_center);
     M5.Display.setTextColor(TFT_DARKGRAY, TFT_BLACK);
     M5.Display.drawString("BtnB: Return to Menu", 120, 122, &fonts::Font0);
 }
 
-// ----------------------------------------------------------------------------
-// SETUP & LOOP
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 4. MAIN FIRMWARE SETUP & LOOP
+// ============================================================================
 void setup() {
     Serial.begin(115200);
 
-    // Hardware Configuration for Stick S3 with Speaker & Mic
+    // Configure M5Stick S3 Hardware
     auto cfg = M5.config();
     cfg.fallback_board = m5::board_t::board_M5StickS3;
-    cfg.internal_spk = true;
     cfg.internal_mic = true;
+    cfg.internal_spk = true;
     M5.begin(cfg);
 
     M5.Display.setRotation(1);
     M5.Display.setBrightness(180);
-    M5.Speaker.setVolume(140);
+
+    // Initialize Microphone Subsystem
     M5.Mic.begin();
+
+    // Keep speaker muted during normal measurements
+    M5.Speaker.setVolume(120);
 
     // Initialize BLE Subsystem
     BLEDevice::init("M5StickS3_Radar");
@@ -1014,33 +1069,38 @@ void loop() {
     M5.update();
 
     // ========================================================================
-    // MENU STATE CONTROLLER
+    // MENU CONTROLLER
     // ========================================================================
     if (g_current_mode == MODE_MENU) {
-        // Button A: Cycle through menu items
+        // Button A: Cycle menu item
         if (M5.BtnA.wasClicked()) {
             g_menu_selection = (g_menu_selection + 1) % TOTAL_MENU_ITEMS;
-            M5.Speaker.tone(1400, 40);
+            M5.Speaker.tone(1400, 30);
             renderMenuScreen();
         }
 
-        // Button B: Confirm and enter selected mode
+        // Button B: Enter selected mode
         if (M5.BtnB.wasClicked()) {
             g_current_mode = (AppState)(g_menu_selection + 1);
-            M5.Speaker.tone(2400, 70);
+            M5.Speaker.tone(2200, 50);
             M5.Display.fillScreen(TFT_BLACK);
+
+            // If entering SLM mode, reset peak hold metric
+            if (g_current_mode == MODE_MIC) {
+                g_peak_dbspl = g_sound_dbspl;
+            }
         }
     } 
     // ========================================================================
-    // ACTIVE APPLICATION MODES
+    // ACTIVE DIAGNOSTIC MODES
     // ========================================================================
     else {
-        // Universal Back Button: Button B returns to Main Menu
+        // Universal Back Button: Button B always returns to Menu
         if (M5.BtnB.wasClicked()) {
             g_current_mode = MODE_MENU;
-            M5.Speaker.tone(800, 80);
+            M5.Speaker.tone(800, 60);
             renderMenuScreen();
-            delay(100);
+            delay(80);
             return;
         }
 
@@ -1050,9 +1110,9 @@ void loop() {
                 break;
 
             case MODE_MIC:
+                // Button A: Reset Peak Hold (Completely silent)
                 if (M5.BtnA.wasClicked()) {
-                    g_peak_db = 0.0f; // Reset Peak
-                    M5.Speaker.tone(1800, 50);
+                    g_peak_dbspl = g_sound_dbspl;
                 }
                 renderMicScreen();
                 break;
@@ -1071,7 +1131,7 @@ void loop() {
         }
     }
 
-    delay(30);
+    delay(25);
 }
 
 ```
