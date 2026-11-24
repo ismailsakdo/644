@@ -85,7 +85,7 @@ lib_deps =
 ; Environment 1: M5Stack Stick S3 (ESP32-S3 Dual-Core Xtensa LX7)
 ; ====================================================================
 [env:m5stack-s3]
-platform = [https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip](https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip)
+platform = espressif32
 board = esp32-s3-devkitc-1
 upload_speed = 921600
 
@@ -101,7 +101,7 @@ build_flags =
 ; Environment 2: M5StickC / M5StickC Plus (ESP32 Classic Fallback)
 ; ====================================================================
 [env:m5stick-plus]
-platform = [https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip](https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip)
+platform = espressif32
 board = m5stick-c
 upload_speed = 1500000
 ```
