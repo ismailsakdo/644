@@ -76,8 +76,8 @@ monitor_speed = 115200
 lib_deps =
     m5stack/M5Unified
     m5stack/M5GFX
-    sinricpro/SinricPro
-    bblanchon/ArduinoJson
+    sinricpro/SinricPro @ ^3.0.0
+    bblanchon/ArduinoJson @ ^6.21.5
     links2004/WebSockets
     tzapu/WiFiManager
 
